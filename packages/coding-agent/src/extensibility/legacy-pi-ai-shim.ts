@@ -92,14 +92,14 @@ export const getModels = getBundledModels;
  */
 export { clampThinkingLevelForModel as clampThinkingLevel } from "@oh-my-pi/pi-catalog";
 
+import type { Api, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, Model } from "@oh-my-pi/pi-ai";
 // ---------------------------------------------------------------------------
 // Upstream pi-ai helpers OMP never carried: `lazyApi`/`lazyStream`
 // (api/lazy.ts) and the assistant-message diagnostics utilities
 // (utils/diagnostics.ts). Faithful ports so legacy provider extensions
 // (e.g. @howaboua/pi-codex-conversion) register cleanly.
 // ---------------------------------------------------------------------------
-import type { Api, AssistantMessage, AssistantMessageEvent, Model } from "@oh-my-pi/pi-ai";
-import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai";
+import { createAssistantMessageEventStream } from "@oh-my-pi/pi-ai";
 
 /** Minimal provider-stream module shape used by `lazyApi`. */
 export interface LegacyProviderStreams {
@@ -154,7 +154,7 @@ export function lazyStream(
 	model: Model<Api>,
 	setup: () => Promise<AsyncIterable<AssistantMessageEvent>>,
 ): AssistantMessageEventStream {
-	const outer = new AssistantMessageEventStream();
+	const outer = createAssistantMessageEventStream();
 	setup()
 		.then(inner => forwardStream(outer, inner))
 		.catch((error: unknown) => {
