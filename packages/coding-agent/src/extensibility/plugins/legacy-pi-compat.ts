@@ -2125,11 +2125,15 @@ export function ensureGraphCommonJsRequireRegistered(): void {
 
 ensureGraphCommonJsRequireRegistered();
 
-let legacyPiLoadTag = 0;
+// Every entry loaded in one reload batch must stamp its transitive imports with
+// the same generation. Per-entry tags split shared modules into multiple live
+// instances and break singleton identity across extensions.
+let extensionGraphGeneration = 0;
+const entryLastLoadedGeneration = new Map<string, number>();
 
-function nextLegacyPiLoadTag(): string {
-	legacyPiLoadTag = Math.max(legacyPiLoadTag + 1, Date.now());
-	return String(legacyPiLoadTag);
+export function bumpExtensionGraphGeneration(): number {
+	extensionGraphGeneration += 1;
+	return extensionGraphGeneration;
 }
 
 /** Resolve symlinks in a path, falling back to the input if realpath fails. */
@@ -2745,6 +2749,12 @@ export async function loadLegacyPiModule(resolvedPath: string): Promise<unknown>
 	// actually hands the hook.
 	const entryRealPath = await realpathOrSelf(path.resolve(resolvedPath));
 	await ensureLegacyPiOverridesReady();
+	const isReload = extensionGraphHookModules.has(entryRealPath);
+	if (isReload && entryLastLoadedGeneration.get(entryRealPath) === extensionGraphGeneration) {
+		// Direct re-load with no SDK batch bump still needs a fresh graph.
+		bumpExtensionGraphGeneration();
+	}
+	entryLastLoadedGeneration.set(entryRealPath, extensionGraphGeneration);
 	const pendingSources = await ensureExtensionGraphHook(entryRealPath);
 	try {
 		// Dynamic import is required: legacy extension entry paths are user/plugin supplied at runtime.
@@ -2755,7 +2765,7 @@ export async function loadLegacyPiModule(resolvedPath: string): Promise<unknown>
 			process.platform === "win32" || isBundledVirtualSpecifier(entryRealPath)
 				? toImportSpecifier(entryRealPath)
 				: entryRealPath;
-		return await import(`${entrySpecifier}?mtime=${nextLegacyPiLoadTag()}`);
+		return await import(`${entrySpecifier}?mtime=${extensionGraphGeneration}`);
 	} finally {
 		// Drop whatever the initial import didn't consume: graph modules only
 		// reached by lazy dynamic imports must be read from disk at their actual
