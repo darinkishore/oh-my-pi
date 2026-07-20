@@ -1362,9 +1362,6 @@ export function getPackageDir(): string {
 }
 
 export * from "../index";
-export { formatBytes as formatSize } from "../tools/render-utils";
-export { Type } from "./typebox";
-
 // ---------------------------------------------------------------------------
 // Package-root helpers that upstream Pi exports from `pi-coding-agent` but
 // OMP's index does not re-export. Legacy extensions (e.g.
@@ -1377,7 +1374,9 @@ export { truncateToVisualLines } from "../modes/components/visual-truncate";
 export { getSettingsListTheme } from "../modes/theme/theme";
 export { convertToLlm } from "../session/messages";
 export { buildSessionContext } from "../session/session-context";
+export { formatBytes as formatSize } from "../tools/render-utils";
 export { resizeImage } from "../utils/image-resize";
+export { Type } from "./typebox";
 
 /** Upstream Pi exports `getShellConfig` from the package root; OMP keeps it in pi-utils' procmgr. */
 export const getShellConfig = procmgr.getShellConfig;
