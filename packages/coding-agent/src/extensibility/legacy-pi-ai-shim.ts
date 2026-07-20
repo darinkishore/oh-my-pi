@@ -239,7 +239,8 @@ export function lazyStream(
  */
 export function lazyApi(load: () => Promise<LegacyProviderStreams>): LegacyProviderStreams {
 	return {
-		stream: (model, context, options) => lazyStream(model, async () => (await load()).stream(model, context, options)),
+		stream: (model, context, options) =>
+			lazyStream(model, async () => (await load()).stream(model, context, options)),
 		streamSimple: (model, context, options) =>
 			lazyStream(model, async () => (await load()).streamSimple(model, context, options)),
 	};
