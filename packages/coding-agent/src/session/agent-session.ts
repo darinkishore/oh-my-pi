@@ -135,7 +135,12 @@ import type {
 import { emitSessionShutdownEvent } from "../extensibility/extensions";
 import { ManagedTimers } from "../extensibility/extensions/managed-timers";
 import { createExtensionModelQuery } from "../extensibility/extensions/model-api";
-import type { CompactOptions, ContextUsage } from "../extensibility/extensions/types";
+import type {
+	CompactOptions,
+	ContextUsage,
+	ExtensionsReloadOptions,
+	ExtensionsReloadReport,
+} from "../extensibility/extensions/types";
 import type { HookCommandContext } from "../extensibility/hooks/types";
 import type { Skill, SkillWarning } from "../extensibility/skills";
 import { expandSlashCommand, type FileSlashCommand } from "../extensibility/slash-commands";
@@ -568,6 +573,10 @@ export class AgentSession {
 	#detachUsageBeforeQueueDequeue: (() => void) | undefined;
 	#detachUsageBeforeModelCall: (() => void) | undefined;
 
+	// Transactional extension reload tracking (Orientation host patch)
+	readonly #extensionToolVersionCounters = new Map<string, number>();
+	readonly #extensionOwnedToolNames = new Set<string>();
+	readonly #deferredExtensionToolNames = new Set<string>();
 	#transformContext: (messages: AgentMessage[], signal?: AbortSignal) => AgentMessage[] | Promise<AgentMessage[]>;
 	#onPayload: SimpleStreamOptions["onPayload"] | undefined;
 	#onResponse: SimpleStreamOptions["onResponse"] | undefined;
@@ -4187,6 +4196,161 @@ export class AgentSession {
 		return this.#tools.getToolByName(name);
 	}
 
+	/** Resolve only tools explicitly deferred by a committed extension reload. */
+	getDeferredExtensionToolByName(name: string): AgentTool | undefined {
+		if (!this.#deferredExtensionToolNames.has(name)) {
+			return undefined;
+		}
+		return this.#tools.registry.get(name);
+	}
+
+	/**
+	 * Commit fresh extension tools while preserving the current model-visible
+	 * schema unless `force` explicitly permits a cache-invalidating change.
+	 */
+	async applyExtensionsReload(
+		previousExtensionToolNames: string[],
+		freshTools: AgentTool[],
+		options?: ExtensionsReloadOptions,
+	): Promise<ExtensionsReloadReport> {
+		const force = options?.force === true;
+		const registry = this.#tools.registry;
+		const previousActive = this.getActiveToolNames();
+		const previousToolRegistry = new Map(registry);
+		const previousOwnedToolNames = new Set(this.#extensionOwnedToolNames);
+		const previousDeferredToolNames = new Set(this.#deferredExtensionToolNames);
+		const previousVersionCounters = new Map(this.#extensionToolVersionCounters);
+		const activeNames = new Set(previousActive);
+		const freshByName = new Map(freshTools.map(tool => [tool.name, tool]));
+		const previousNames = new Set(previousExtensionToolNames);
+		for (const name of previousNames) {
+			this.#extensionOwnedToolNames.add(name);
+		}
+
+		// A deferred tool reappearing after an earlier reload is an update, not a
+		// collision or a second add.
+		for (const name of freshByName.keys()) {
+			if (!previousNames.has(name) && registry.has(name) && this.#extensionOwnedToolNames.has(name)) {
+				previousNames.add(name);
+			}
+		}
+
+		const report: ExtensionsReloadReport = {
+			refreshed: [],
+			descriptionFrozen: [],
+			versioned: [],
+			added: [],
+			removed: [],
+			cacheClean: true,
+			toolAnnouncements: [],
+			errors: [],
+		};
+		const announce = (tool: AgentTool): void => {
+			report.toolAnnouncements.push({
+				name: tool.name,
+				description: tool.description ?? "",
+				params: describeToolParamsForAnnouncement(tool),
+			});
+		};
+		const registerDeferred = (tool: AgentTool): void => {
+			registry.set(tool.name, tool);
+			this.#extensionOwnedToolNames.add(tool.name);
+			this.#deferredExtensionToolNames.add(tool.name);
+			announce(tool);
+		};
+		const registerVersioned = (name: string, freshTool: AgentTool): void => {
+			let version = (this.#extensionToolVersionCounters.get(name) ?? 1) + 1;
+			let versionedName = `${name}_v${version}`;
+			while (registry.has(versionedName) || freshByName.has(versionedName)) {
+				version += 1;
+				versionedName = `${name}_v${version}`;
+			}
+			this.#extensionToolVersionCounters.set(name, version);
+			registerDeferred(renameToolForVersioning(freshTool, versionedName));
+			report.versioned.push({ name, versionedName });
+		};
+
+		try {
+			for (const name of previousNames) {
+				const oldTool = registry.get(name);
+				const freshTool = freshByName.get(name);
+				if (!oldTool) {
+					if (freshTool) {
+						registry.set(name, freshTool);
+						report.refreshed.push(name);
+					}
+					continue;
+				}
+				if (!freshTool) {
+					if (!activeNames.has(name) || force) {
+						registry.delete(name);
+						this.#extensionOwnedToolNames.delete(name);
+						this.#deferredExtensionToolNames.delete(name);
+						if (activeNames.has(name)) {
+							report.cacheClean = false;
+						}
+					}
+					report.removed.push(name);
+					continue;
+				}
+				if (!activeNames.has(name)) {
+					registry.set(name, freshTool);
+					report.refreshed.push(name);
+					continue;
+				}
+				const schemaDelta = classifyToolSchemaDelta(oldTool, freshTool);
+				if (schemaDelta === "identical") {
+					registry.set(name, freshTool);
+					report.refreshed.push(name);
+				} else if (force) {
+					registry.set(name, freshTool);
+					this.#deferredExtensionToolNames.delete(name);
+					report.refreshed.push(name);
+					report.cacheClean = false;
+				} else if (schemaDelta === "description") {
+					registry.set(name, freezeToolSchemaBytes(freshTool, oldTool));
+					report.descriptionFrozen.push(name);
+				} else {
+					registerVersioned(name, freshTool);
+				}
+			}
+
+			for (const [name, freshTool] of freshByName) {
+				if (previousNames.has(name)) {
+					continue;
+				}
+				if (registry.has(name)) {
+					registerVersioned(name, freshTool);
+					continue;
+				}
+				registerDeferred(freshTool);
+				report.added.push(name);
+			}
+
+			await this.#tools.applyActiveToolsByName(previousActive.filter(name => registry.has(name)));
+			return report;
+		} catch (error) {
+			registry.clear();
+			for (const [name, tool] of previousToolRegistry) {
+				registry.set(name, tool);
+			}
+			this.#extensionOwnedToolNames.clear();
+			for (const name of previousOwnedToolNames) {
+				this.#extensionOwnedToolNames.add(name);
+			}
+			this.#deferredExtensionToolNames.clear();
+			for (const name of previousDeferredToolNames) {
+				this.#deferredExtensionToolNames.add(name);
+			}
+			this.#extensionToolVersionCounters.clear();
+			for (const [name, version] of previousVersionCounters) {
+				this.#extensionToolVersionCounters.set(name, version);
+			}
+			await this.#tools.applyActiveToolsByName(previousActive);
+			throw error;
+		}
+	}
+
 	/** Whether a registry entry came from a built-in factory. */
 	hasBuiltInTool(name: string): boolean {
 		return this.#tools.hasBuiltInTool(name);
@@ -5460,6 +5624,13 @@ export class AgentSession {
 			setInterval: (callback, ms, ...args) => this.#fallbackTimers().setInterval(callback, ms, ...args),
 			setTimeout: (callback, ms, ...args) => this.#fallbackTimers().setTimeout(callback, ms, ...args),
 			clearTimer: timer => this.#fallbackTimers().clear(timer),
+			invokeCommand: () => {
+				throw new Error("Extension commands are unavailable without an extension runner.");
+			},
+			getInvocableCommands: () => [],
+			reloadExtensions: () => {
+				throw new Error("Extension hot reload is unavailable without an extension runner.");
+			},
 		};
 	}
 
@@ -9016,4 +9187,72 @@ export class AgentSession {
 	get extensionRunner(): ExtensionRunner | undefined {
 		return this.#extensionRunner;
 	}
+}
+
+function describeToolParamsForAnnouncement(tool: AgentTool): unknown {
+	const parameters: unknown = tool.parameters;
+	if (parameters === undefined || parameters === null) {
+		return undefined;
+	}
+	if (typeof parameters === "object" && "toJsonSchema" in parameters) {
+		const toJsonSchema = parameters.toJsonSchema;
+		if (typeof toJsonSchema === "function") {
+			try {
+				return toJsonSchema.call(parameters);
+			} catch {
+				// Fall through to plain serialization.
+			}
+		}
+	}
+	try {
+		return JSON.parse(JSON.stringify(parameters));
+	} catch {
+		return undefined;
+	}
+}
+
+function serializeToolParamsForComparison(tool: AgentTool): string | undefined {
+	const parameters = describeToolParamsForAnnouncement(tool);
+	if (parameters === undefined) {
+		return undefined;
+	}
+	try {
+		return JSON.stringify(parameters);
+	} catch {
+		return undefined;
+	}
+}
+
+type ToolSchemaDelta = "identical" | "description" | "params";
+
+function classifyToolSchemaDelta(oldTool: AgentTool, freshTool: AgentTool): ToolSchemaDelta {
+	const oldParameters = serializeToolParamsForComparison(oldTool);
+	const freshParameters = serializeToolParamsForComparison(freshTool);
+	if (oldParameters === undefined || freshParameters === undefined || oldParameters !== freshParameters) {
+		return "params";
+	}
+	const textIsIdentical =
+		(oldTool.label ?? "") === (freshTool.label ?? "") &&
+		(oldTool.description ?? "") === (freshTool.description ?? "") &&
+		(oldTool.customWireName ?? "") === (freshTool.customWireName ?? "") &&
+		oldTool.strict === freshTool.strict;
+	return textIsIdentical ? "identical" : "description";
+}
+
+function freezeToolSchemaBytes(freshTool: AgentTool, oldTool: AgentTool): AgentTool {
+	const frozen = Object.create(freshTool) as AgentTool;
+	Object.defineProperties(frozen, {
+		label: { value: oldTool.label, enumerable: true },
+		description: { value: oldTool.description, enumerable: true },
+		customWireName: { value: oldTool.customWireName, enumerable: true },
+		parameters: { value: oldTool.parameters, enumerable: true },
+		strict: { value: oldTool.strict, enumerable: true },
+	});
+	return frozen;
+}
+
+function renameToolForVersioning(freshTool: AgentTool, versionedName: string): AgentTool {
+	const renamed = Object.create(freshTool) as AgentTool;
+	Object.defineProperty(renamed, "name", { value: versionedName, enumerable: true });
+	return renamed;
 }

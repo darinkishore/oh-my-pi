@@ -261,6 +261,7 @@ describe("ExtensionRunner", () => {
 						label: "${name}",
 						description: "Test tool",
 						parameters: Type.Object({}),
+						strict: false,
 						execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
 					});
 				}
@@ -280,6 +281,7 @@ describe("ExtensionRunner", () => {
 
 			expect(tools.length).toBe(2);
 			expect(tools.map(t => t.definition.name).sort()).toEqual(["tool_a", "tool_b"]);
+			expect(tools.every(t => t.definition.strict === false)).toBe(true);
 		});
 	});
 

@@ -480,6 +480,44 @@ export interface ExtensionContext {
 		params: Record<string, unknown>,
 		options?: { signal?: AbortSignal; onUpdate?: AgentToolUpdateCallback<TDetails> },
 	): Promise<AgentToolResult<TDetails>>;
+	/**
+	 * Invoke a registered extension command using a fresh command context.
+	 * Throws when the command does not exist.
+	 */
+	invokeCommand(name: string, args?: string): Promise<unknown>;
+	/** Commands explicitly exposed to the model-visible `command` tool. */
+	getInvocableCommands(): Array<{ name: string; description?: string }>;
+	/** Replace this session's live extension graph without restarting it. */
+	reloadExtensions(options?: ExtensionsReloadOptions): Promise<ExtensionsReloadReport>;
+}
+
+export interface ExtensionsReloadOptions {
+	/**
+	 * Apply model-visible tool schema changes immediately. The default preserves
+	 * the current prompt-cache prefix and defers incompatible definitions.
+	 */
+	force?: boolean;
+}
+
+export interface ExtensionsReloadReport {
+	/** Fresh behavior installed without changing model-visible schema bytes. */
+	refreshed: string[];
+	/** Fresh behavior installed while retaining the prior label/description. */
+	descriptionFrozen: string[];
+	/** Incompatible definitions registered under a deferred versioned name. */
+	versioned: Array<{ name: string; versionedName: string }>;
+	/** New definitions registered as deferred tools. */
+	added: string[];
+	/** Definitions absent from the fresh extension graph. */
+	removed: string[];
+	/** Whether the model-visible prefix stayed byte-stable. */
+	cacheClean: boolean;
+	/** Schemas for deferred tools that are callable by explicit name. */
+	toolAnnouncements: Array<{ name: string; description: string; params: unknown }>;
+	/** Per-extension load errors. */
+	errors: Array<{ path: string; error: string }>;
+	/** No live state changed because fresh graph construction failed. */
+	aborted?: true;
 }
 
 /**
@@ -1110,8 +1148,10 @@ export type AssistantThinkingRenderer = (
 export interface RegisteredCommand {
 	name: string;
 	description?: string;
+	/** Expose this command through the model-visible `command` tool. */
+	modelInvocable?: boolean;
 	getArgumentCompletions?: (argumentPrefix: string) => AutocompleteItem[] | null;
-	handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
+	handler: (args: string, ctx: ExtensionCommandContext) => Promise<unknown>;
 }
 
 // ============================================================================
@@ -1227,6 +1267,7 @@ export interface ExtensionAPI {
 		name: string,
 		options: {
 			description?: string;
+			modelInvocable?: RegisteredCommand["modelInvocable"];
 			getArgumentCompletions?: RegisteredCommand["getArgumentCompletions"];
 			handler: RegisteredCommand["handler"];
 		},
@@ -1594,6 +1635,12 @@ export interface Extension {
 	commands: Map<string, RegisteredCommand>;
 	flags: Map<string, ExtensionFlag>;
 	shortcuts: Map<KeyId, ExtensionShortcut>;
+	/** Shared-bus subscriptions owned by this extension instance. */
+	busDisposers: Array<() => void>;
+	/** Activate subscriptions staged while a fresh reload graph was built. */
+	activateEventSubscriptions(): void;
+	/** Dispose active and staged subscriptions owned by this instance. */
+	disposeEventSubscriptions(): void;
 }
 
 /** Result of loading extensions. */
