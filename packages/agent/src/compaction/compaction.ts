@@ -1503,10 +1503,16 @@ export async function compact(
 		// redundant LLM round. If a LATER compaction cannot reuse this payload,
 		// prepareCompaction re-expands the original messages and summarizes them
 		// locally then (see remotePreserveReusableByAny).
-		const usedTokens = getCompactionV2PreserveData(preserveData)?.usedTokens ?? 0;
-		summary =
-			"Remote compaction preserved provider-native history for this session." +
-			(usedTokens > 0 ? ` Retained ${usedTokens} tokens in the provider replay payload.` : "");
+		const telemetry = getCompactionV2PreserveData(preserveData);
+		summary = "Remote compaction preserved provider-native history for this session.";
+		if (telemetry) {
+			summary +=
+				` Provider compaction processed ${telemetry.processedInputTokens} input tokens` +
+				` and produced ${telemetry.providerOutputTokens} output tokens.` +
+				` Retained beside the opaque compaction item: ${telemetry.retainedMessageCount} raw messages` +
+				` and ${telemetry.retainedImageCount} images.` +
+				` Estimated next replay window: ${telemetry.estimatedReplayTokens} tokens.`;
+		}
 	} else if (isSplitTurn && turnPrefixMessages.length > 0) {
 		// Generate both summaries in parallel
 		const [historyResult, turnPrefixResult] = await Promise.all([

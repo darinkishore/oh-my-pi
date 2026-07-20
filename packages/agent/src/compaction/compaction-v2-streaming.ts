@@ -83,9 +83,22 @@ export interface CompactionV2Request {
 export interface CompactionV2Response {
 	compactionItem: Record<string, unknown>;
 	replacementHistory: Array<Record<string, unknown>>;
-	usedTokens: number;
+	processedInputTokens: number;
+	providerOutputTokens: number;
 	usage?: CompactionV2Usage;
+	retainedMessageCount: number;
 	retainedImageCount: number;
+	estimatedReplayTokens: number;
+}
+
+export interface CompactionV2PreserveData {
+	provider: string;
+	replacementHistory: Array<Record<string, unknown>>;
+	processedInputTokens: number;
+	providerOutputTokens: number;
+	retainedMessageCount: number;
+	retainedImageCount: number;
+	estimatedReplayTokens: number;
 }
 
 // ============================================================================
@@ -479,9 +492,12 @@ async function collectCompactionV2Output(
 	return {
 		compactionItem,
 		replacementHistory,
-		usedTokens: state.usage?.inputTokens ?? 0,
+		processedInputTokens: state.usage?.inputTokens ?? 0,
+		providerOutputTokens: state.usage?.outputTokens ?? 0,
 		usage: state.usage,
+		retainedMessageCount: Math.max(0, replacementHistory.length - 1),
 		retainedImageCount,
+		estimatedReplayTokens: estimateCompactionV2ReplayTokens(replacementHistory),
 	};
 }
 
@@ -677,6 +693,17 @@ function messageContentTokenCount(item: Record<string, unknown>): number {
 	return tokens;
 }
 
+function estimateCompactionV2ReplayTokens(replacementHistory: Array<Record<string, unknown>>): number {
+	let tokens = 0;
+	for (const item of replacementHistory) {
+		tokens +=
+			item.type === "message"
+				? Math.max(messageContentTokenCount(item), 1)
+				: Math.max(approxTokenCount(stringifyJson(item) ?? ""), 1);
+	}
+	return tokens;
+}
+
 function truncateMessageTextToTokenBudget(
 	item: Record<string, unknown>,
 	maxTokens: number,
@@ -740,9 +767,12 @@ export function storeCompactionV2PreserveData(response: CompactionV2Response, mo
 			version: "v2",
 			provider: model.provider,
 			replacementHistory: response.replacementHistory,
-			usedTokens: response.usedTokens,
+			processedInputTokens: response.processedInputTokens,
+			providerOutputTokens: response.providerOutputTokens,
 			usage: response.usage,
+			retainedMessageCount: response.retainedMessageCount,
 			retainedImageCount: response.retainedImageCount,
+			estimatedReplayTokens: response.estimatedReplayTokens,
 		},
 	};
 }
@@ -750,17 +780,39 @@ export function storeCompactionV2PreserveData(response: CompactionV2Response, mo
 /** Retrieve preserved OpenAI replacement history that V2 can extend. */
 export function getCompactionV2PreserveData(
 	preserveData: Record<string, unknown> | undefined,
-): { provider: string; replacementHistory: Array<Record<string, unknown>>; usedTokens: number } | undefined {
+): CompactionV2PreserveData | undefined {
 	const candidate = preserveData?.[OPENAI_REMOTE_COMPACTION_PRESERVE_KEY];
 	if (!isRecord(candidate)) return undefined;
 	const provider = stringField(candidate, "provider");
 	if (!provider) return undefined;
 	if (!Array.isArray(candidate.replacementHistory)) return undefined;
+	const replacementHistory = candidate.replacementHistory as Array<Record<string, unknown>>;
+	const usage = isRecord(candidate.usage) ? candidate.usage : undefined;
+	let retainedMessageCount = 0;
+	let retainedImageCount = 0;
+	for (const item of replacementHistory) {
+		if (isRecord(item) && item.type === "message") {
+			retainedMessageCount += 1;
+			retainedImageCount += retainedInputImageCount(item);
+		}
+	}
 
 	return {
 		provider,
-		replacementHistory: candidate.replacementHistory as Array<Record<string, unknown>>,
-		usedTokens: numberField(candidate, "usedTokens") ?? 0,
+		replacementHistory,
+		processedInputTokens:
+			numberField(candidate, "processedInputTokens") ??
+			(usage ? numberField(usage, "inputTokens") : undefined) ??
+			numberField(candidate, "usedTokens") ??
+			0,
+		providerOutputTokens:
+			numberField(candidate, "providerOutputTokens") ??
+			(usage ? numberField(usage, "outputTokens") : undefined) ??
+			0,
+		retainedMessageCount: numberField(candidate, "retainedMessageCount") ?? retainedMessageCount,
+		retainedImageCount: numberField(candidate, "retainedImageCount") ?? retainedImageCount,
+		estimatedReplayTokens:
+			numberField(candidate, "estimatedReplayTokens") ?? estimateCompactionV2ReplayTokens(replacementHistory),
 	};
 }
 

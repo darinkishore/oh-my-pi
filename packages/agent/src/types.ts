@@ -115,6 +115,13 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	interruptMode?: "immediate" | "wait";
 
 	/**
+	 * Resolve an explicitly named tool that is intentionally absent from the
+	 * model-visible active set. Called only after active name and wire-name
+	 * lookup miss.
+	 */
+	resolveExtraTool?: (name: string) => AgentTool<any> | undefined;
+
+	/**
 	 * Optional session identifier forwarded to LLM providers.
 	 * Used by providers that support session-based caching (e.g., OpenAI Codex).
 	 */

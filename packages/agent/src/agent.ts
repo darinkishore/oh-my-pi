@@ -232,6 +232,9 @@ export interface AgentOptions {
 	 */
 	getToolContext?: (toolCall?: ToolCallContext) => AgentToolContext | undefined;
 
+	/** Resolve explicitly callable tools outside the model-visible active set. */
+	resolveExtraTool?: AgentLoopConfig["resolveExtraTool"];
+
 	/**
 	 * Optional transform applied to tool call arguments before execution.
 	 * Use for deobfuscating secrets or rewriting arguments.
@@ -364,6 +367,7 @@ export class Agent {
 	#hideThinkingSummary?: boolean;
 	#maxRetryDelayMs?: number;
 	#getToolContext?: (toolCall?: ToolCallContext) => AgentToolContext | undefined;
+	#resolveExtraTool?: AgentLoopConfig["resolveExtraTool"];
 	#cursorExecHandlers?: CursorExecHandlers;
 	#getCursorTools?: () => AgentTool[];
 	#cursorOnToolResult?: CursorToolResultHandler;
@@ -447,6 +451,7 @@ export class Agent {
 		this.#onResponse = opts.onResponse;
 		this.#onSseEvent = opts.onSseEvent;
 		this.#getToolContext = opts.getToolContext;
+		this.#resolveExtraTool = opts.resolveExtraTool;
 		this.#cursorExecHandlers = opts.cursorExecHandlers;
 		this.#getCursorTools = opts.getCursorTools;
 		this.#cursorOnToolResult = opts.cursorOnToolResult;
@@ -1162,6 +1167,7 @@ export class Agent {
 			onSseEvent: this.#onSseEvent,
 			getApiKey: this.getApiKey,
 			getToolContext: this.#getToolContext,
+			resolveExtraTool: this.#resolveExtraTool,
 			syncContextBeforeModelCall: async context => {
 				if (this.#listeners.size > 0) {
 					await Bun.sleep(0);
