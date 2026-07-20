@@ -170,13 +170,37 @@ describe("command tool extension reload", () => {
 		return { session: result.session, entryPath, valuePath };
 	}
 
-	it("reloads an edited transitive module through the model-visible command tool", async () => {
+	it("reloads an edited module without unmounting dynamic devices", async () => {
 		const { session, valuePath } = await createProbeSession();
 		try {
 			const runner = session.extensionRunner;
 			if (!runner) {
 				throw new Error("extension runner missing");
 			}
+			const mcpTool = {
+				name: "mcp__reload_probe__search",
+				label: "reload-probe/search",
+				description: "searches the reload probe",
+				parameters: { type: "object" as const, properties: {} },
+				mcpServerName: "reload-probe",
+				mcpToolName: "search",
+				execute: async () => ({ content: [{ type: "text" as const, text: "mcp-live" }] }),
+			};
+			const hostTool: AgentTool = {
+				name: "host_reload_probe",
+				label: "Host reload probe",
+				description: "checks host tool liveness across extension reloads",
+				parameters: { type: "object", properties: {} },
+				loadMode: "discoverable",
+				execute: async () => ({ content: [{ type: "text" as const, text: "host-live" }] }),
+			};
+			await session.refreshRpcHostTools([hostTool]);
+			await session.refreshMCPTools([mcpTool]);
+			const mountedBefore = session.getXdevToolEntries().map(entry => entry.name);
+			expect(mountedBefore).toContain("probe");
+			expect(mountedBefore).toContain(hostTool.name);
+			expect(mountedBefore).toContain(mcpTool.name);
+			const systemPromptBefore = session.systemPrompt;
 			expect(runner.getCommand("reload-extensions")?.modelInvocable).toBe(true);
 			expect(runner.createContext().getInvocableCommands()).toContainEqual({
 				name: "reload-extensions",
@@ -195,7 +219,27 @@ describe("command tool extension reload", () => {
 				type: "text",
 				text: expect.stringContaining("model-visible prefix unchanged"),
 			});
+			expect(session.getXdevToolEntries().map(entry => entry.name)).toEqual(expect.arrayContaining(mountedBefore));
+			expect(session.systemPrompt).toEqual(systemPromptBefore);
 			expect(await readTextResult(session.getToolByName("probe"))).toBe("probe-v2");
+			const write = session.getToolByName("write");
+			if (!write) {
+				throw new Error("write tool missing");
+			}
+			const mcpResult = await write.execute(
+				"call-mcp-after-reload",
+				{ path: `xd://${mcpTool.name}`, content: "{}" },
+				undefined,
+				undefined,
+			);
+			expect(mcpResult.content[0]).toEqual({ type: "text", text: "mcp-live" });
+			const hostResult = await write.execute(
+				"call-host-after-reload",
+				{ path: `xd://${hostTool.name}`, content: "{}" },
+				undefined,
+				undefined,
+			);
+			expect(hostResult.content[0]).toEqual({ type: "text", text: "host-live" });
 		} finally {
 			await session.dispose();
 		}
@@ -236,6 +280,51 @@ describe("command tool extension reload", () => {
 			expect(session.getActiveToolNames()).not.toContain("late_probe");
 			expect(session.getDeferredExtensionToolByName("late_probe")?.name).toBe("late_probe");
 			expect(session.getDeferredExtensionToolByName("command")).toBeUndefined();
+		} finally {
+			await session.dispose();
+		}
+	});
+
+	it("retires an incompatible tool closure and directs calls to its versioned replacement", async () => {
+		const { session, entryPath } = await createProbeSession();
+		try {
+			writeFileSync(
+				entryPath,
+				[
+					'import { PROBE_VALUE } from "./probe-value.ts";',
+					"",
+					"export default function probeExtension(api) {",
+					"  api.registerTool({",
+					'    name: "probe",',
+					'    label: "probe",',
+					'    description: "returns the probe value",',
+					'    parameters: { type: "object", properties: { value: { type: "string" } }, required: ["value"] },',
+					"    async execute() {",
+					'      return { content: [{ type: "text", text: PROBE_VALUE }] };',
+					"    },",
+					"  });",
+					"}",
+					"",
+				].join("\n"),
+			);
+			const runner = session.extensionRunner;
+			if (!runner) {
+				throw new Error("extension runner missing");
+			}
+			const report = await runner.createContext().reloadExtensions();
+			expect(report.versioned).toEqual([{ name: "probe", versionedName: "probe_v2" }]);
+
+			const retired = session.getToolByName("probe");
+			if (!retired) {
+				throw new Error("retired probe tool missing");
+			}
+			const retiredResult = await retired.execute("retired-probe", {}, undefined, undefined);
+			expect(retiredResult.isError).toBe(true);
+			expect(retiredResult.content[0]).toEqual({
+				type: "text",
+				text: 'Tool "probe" changed schema during extension reload and was retired. Retry with "probe_v2".',
+			});
+			expect(await readTextResult(session.getDeferredExtensionToolByName("probe_v2"))).toBe("probe-v1");
 		} finally {
 			await session.dispose();
 		}

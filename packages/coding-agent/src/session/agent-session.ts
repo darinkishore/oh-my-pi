@@ -7370,12 +7370,12 @@ export class AgentSession {
 		options?: ExtensionsReloadOptions,
 	): Promise<ExtensionsReloadReport> {
 		const force = options?.force === true;
-		const previousActive = this.getActiveToolNames();
+		const previousEnabled = this.getEnabledToolNames();
 		const previousToolRegistry = new Map(this.#toolRegistry);
 		const previousOwnedToolNames = new Set(this.#extensionOwnedToolNames);
 		const previousDeferredToolNames = new Set(this.#deferredExtensionToolNames);
 		const previousVersionCounters = new Map(this.#extensionToolVersionCounters);
-		const activeNames = new Set(previousActive);
+		const activeNames = new Set(previousEnabled);
 		const freshByName = new Map(freshTools.map(tool => [tool.name, tool]));
 		const previousNames = new Set(previousExtensionToolNames);
 		for (const name of previousNames) {
@@ -7413,7 +7413,7 @@ export class AgentSession {
 			this.#deferredExtensionToolNames.add(tool.name);
 			announce(tool);
 		};
-		const registerVersioned = (name: string, freshTool: AgentTool): void => {
+		const registerVersioned = (name: string, freshTool: AgentTool, retirePrevious = false): void => {
 			let version = (this.#extensionToolVersionCounters.get(name) ?? 1) + 1;
 			let versionedName = `${name}_v${version}`;
 			while (this.#toolRegistry.has(versionedName) || freshByName.has(versionedName)) {
@@ -7422,6 +7422,12 @@ export class AgentSession {
 			}
 			this.#extensionToolVersionCounters.set(name, version);
 			registerDeferred(renameToolForVersioning(freshTool, versionedName));
+			if (retirePrevious) {
+				const previousTool = this.#toolRegistry.get(name);
+				if (previousTool) {
+					this.#toolRegistry.set(name, retireVersionedTool(previousTool, versionedName));
+				}
+			}
 			report.versioned.push({ name, versionedName });
 		};
 
@@ -7466,7 +7472,7 @@ export class AgentSession {
 					this.#toolRegistry.set(name, freezeToolSchemaBytes(freshTool, oldTool));
 					report.descriptionFrozen.push(name);
 				} else {
-					registerVersioned(name, freshTool);
+					registerVersioned(name, freshTool, true);
 				}
 			}
 
@@ -7482,7 +7488,7 @@ export class AgentSession {
 				report.added.push(name);
 			}
 
-			await this.#applyActiveToolsByName(previousActive.filter(name => this.#toolRegistry.has(name)));
+			await this.#applyActiveToolsByName(previousEnabled.filter(name => this.#toolRegistry.has(name)));
 			return report;
 		} catch (error) {
 			this.#toolRegistry.clear();
@@ -7501,7 +7507,7 @@ export class AgentSession {
 			for (const [name, version] of previousVersionCounters) {
 				this.#extensionToolVersionCounters.set(name, version);
 			}
-			await this.#applyActiveToolsByName(previousActive);
+			await this.#applyActiveToolsByName(previousEnabled);
 			throw error;
 		}
 	}
@@ -18370,4 +18376,20 @@ function renameToolForVersioning(freshTool: AgentTool, versionedName: string): A
 	const renamed = Object.create(freshTool) as AgentTool;
 	Object.defineProperty(renamed, "name", { value: versionedName, enumerable: true });
 	return renamed;
+}
+
+function retireVersionedTool(previousTool: AgentTool, versionedName: string): AgentTool {
+	const retired = Object.create(previousTool) as AgentTool;
+	Object.defineProperty(retired, "execute", {
+		value: async () => ({
+			content: [
+				{
+					type: "text" as const,
+					text: `Tool "${previousTool.name}" changed schema during extension reload and was retired. Retry with "${versionedName}".`,
+				},
+			],
+			isError: true,
+		}),
+	});
+	return retired;
 }

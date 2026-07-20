@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed cache-clean extension reloads unmounting every dynamic `xd://` device, including extension, MCP, and RPC host tools.
+- Retired extension tool closures after incompatible schema reloads so disposed state cannot keep handling calls; stale names now direct the model to the versioned replacement.
+
 ## [17.0.5] - 2026-07-18
 
 ### Added
