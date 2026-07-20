@@ -719,6 +719,29 @@ describe("remote compaction input forwarding", () => {
 });
 
 describe("requestCompactionV2Streaming", () => {
+	test("reads legacy V2 usage as processed input rather than retained tokens", () => {
+		const preserved = getCompactionV2PreserveData({
+			openaiRemoteCompaction: {
+				version: "v2",
+				provider: "openai-codex",
+				replacementHistory: [
+					{ type: "message", role: "user", content: [{ type: "input_text", text: "retained user" }] },
+					{ type: "compaction", encrypted_content: "opaque" },
+				],
+				usedTokens: 240_052,
+				usage: { inputTokens: 240_052, outputTokens: 3240, totalTokens: 243_292 },
+			},
+		});
+
+		expect(preserved).toMatchObject({
+			processedInputTokens: 240_052,
+			providerOutputTokens: 3240,
+			retainedMessageCount: 1,
+			retainedImageCount: 0,
+		});
+		expect(preserved?.estimatedReplayTokens).toBeGreaterThan(0);
+	});
+
 	test("posts a compaction_trigger Responses stream and installs Codex-style replacement history", async () => {
 		const userItem = { type: "message", role: "user", content: [{ type: "input_text", text: "real user" }] };
 		const compactionItem = { type: "compaction", encrypted_content: "enc_123" };
@@ -793,7 +816,11 @@ describe("requestCompactionV2Streaming", () => {
 		expect(requestBody?.prompt_cache_key).toBe("cache-1");
 		expect(requestBody?.input[requestBody.input.length - 1]).toEqual({ type: "compaction_trigger" });
 		expect(result.replacementHistory).toEqual([userItem, compactionItem]);
-		expect(result.usedTokens).toBe(123);
+		expect(result.processedInputTokens).toBe(123);
+		expect(result.providerOutputTokens).toBe(4);
+		expect(result.retainedMessageCount).toBe(1);
+		expect(result.retainedImageCount).toBe(0);
+		expect(result.estimatedReplayTokens).toBeGreaterThan(0);
 		expect(result.usage?.cachedInputTokens).toBe(7);
 		expect(result.usage?.reasoningOutputTokens).toBe(1);
 	});
@@ -1819,9 +1846,14 @@ describe("compact() remote compaction failure handling", () => {
 		// Reasoning effort is sent like a normal turn (gpt-5 is a reasoning model).
 		expect(requestBody?.reasoning).toMatchObject({ effort: "high", summary: "auto" });
 		const remote = getCompactionV2PreserveData(result.preserveData);
-		expect(remote?.usedTokens).toBe(55);
+		expect(remote?.processedInputTokens).toBe(55);
+		expect(remote?.providerOutputTokens).toBe(3);
 		expect(remote?.replacementHistory.at(-1)).toEqual(compactionItem);
 		expect(result.summary).toContain("Remote compaction preserved provider-native history");
+		expect(result.summary).toContain("processed 55 input tokens and produced 3 output tokens");
+		expect(result.summary).toContain("Retained beside the opaque compaction item:");
+		expect(result.summary).toContain("Estimated next replay window:");
+		expect(result.summary).not.toContain("Retained 55 tokens");
 		expect(completeSpy).not.toHaveBeenCalled();
 	});
 
