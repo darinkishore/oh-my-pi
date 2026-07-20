@@ -23,8 +23,9 @@ import {
 	type Api,
 	type AssistantMessage,
 	type AssistantMessageEvent,
-	AssistantMessageEventStream,
+	type AssistantMessageEventStream,
 	type Context,
+	createAssistantMessageEventStream,
 	type Model,
 	type SimpleStreamOptions,
 	streamSimple,
@@ -167,7 +168,6 @@ export { parseJsonWithRepair, parseStreamingJson, repairJson } from "@oh-my-pi/p
 // (utils/diagnostics.ts). Faithful ports so legacy provider extensions
 // (e.g. @howaboua/pi-codex-conversion) register cleanly.
 // ---------------------------------------------------------------------------
-
 /** Minimal provider-stream module shape used by `lazyApi`. */
 export interface LegacyProviderStreams {
 	stream: (model: Model<Api>, context: unknown, options?: unknown) => AsyncIterable<AssistantMessageEvent>;
@@ -221,7 +221,7 @@ export function lazyStream(
 	model: Model<Api>,
 	setup: () => Promise<AsyncIterable<AssistantMessageEvent>>,
 ): AssistantMessageEventStream {
-	const outer = new AssistantMessageEventStream();
+	const outer = createAssistantMessageEventStream();
 	setup()
 		.then(inner => forwardStream(outer, inner))
 		.catch((error: unknown) => {
