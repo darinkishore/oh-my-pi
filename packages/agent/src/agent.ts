@@ -237,6 +237,7 @@ export interface AgentOptions {
 	 */
 	getToolContext?: (toolCall?: ToolCallContext) => AgentToolContext | undefined;
 
+
 	/**
 	 * Optional transform applied to tool call arguments before execution.
 	 * Use for deobfuscating secrets or rewriting arguments.
