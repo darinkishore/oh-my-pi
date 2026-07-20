@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `compaction.remoteStrategy` so native Responses streaming compaction models can use context-full maintenance while other models retain the configured fallback strategy.
+
+### Fixed
+
+- Fixed cache-clean extension reloads unmounting every dynamic `xd://` device, including extension, MCP, and RPC host tools.
+- Retired extension tool closures after incompatible schema reloads so disposed state cannot keep handling calls; stale names now direct the model to the versioned replacement.
+- Kept retired extension tool names as serializable own properties so `/reload-extensions` cannot make the next Codex request fail with a missing tool name.
+
 ## [18.1.14] - 2026-09-07
 
 ### Fixed
