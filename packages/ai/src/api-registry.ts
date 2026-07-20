@@ -41,6 +41,11 @@ true satisfies _CheckBuiltinApis;
 
 const BUILTIN_APIS = new Set<KnownApi>(BUILTIN_API_IDS);
 
+/** True when `api` names one of the host's built-in API implementations. */
+export function isBuiltinApi(api: string): boolean {
+	return BUILTIN_APIS.has(api as KnownApi);
+}
+
 export type CustomStreamFn = (
 	model: Model<Api>,
 	context: Context,
