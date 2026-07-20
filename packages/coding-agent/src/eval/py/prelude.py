@@ -543,6 +543,7 @@ if "__omp_prelude_loaded__" not in globals():
         if has_data or schema is not None:
             node["data"] = parsed
         for src_key, dst_key in (
+            ("model", "model"),
             ("isolated", "isolated"),
             ("patchPath", "patch_path"),
             ("branchName", "branch_name"),
