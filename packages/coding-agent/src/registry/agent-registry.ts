@@ -154,6 +154,19 @@ export class AgentRegistry {
 		this.#emit({ type: "removed", ref });
 	}
 
+	/**
+	 * Remove a registration only while the exact ref is still current. Session
+	 * teardown is asynchronous; a rebuilt session may register the same id before
+	 * the old teardown reaches its cleanup block.
+	 */
+	unregisterRef(ref: AgentRef): void {
+		if (this.#refs.get(ref.id) !== ref) {
+			return;
+		}
+		this.#refs.delete(ref.id);
+		this.#emit({ type: "removed", ref });
+	}
+
 	get(id: string): AgentRef | undefined {
 		return this.#refs.get(id);
 	}

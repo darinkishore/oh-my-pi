@@ -36,6 +36,8 @@ import type {
 	ExtensionFlag,
 	ExtensionRuntime,
 	ExtensionShortcut,
+	ExtensionsReloadOptions,
+	ExtensionsReloadReport,
 	ExtensionUIContext,
 	InputEvent,
 	InputEventResult,
@@ -237,6 +239,8 @@ export class ExtensionRunner {
 	#navigateTreeHandler: NavigateTreeHandler = async () => ({ cancelled: false });
 	#switchSessionHandler: SwitchSessionHandler = async () => ({ cancelled: false });
 	#reloadHandler: () => Promise<void> = async () => {};
+	#extensionsReloader?: (options?: ExtensionsReloadOptions) => Promise<ExtensionsReloadReport>;
+	readonly #extensionsReloadListeners = new Set<(report: ExtensionsReloadReport) => void>();
 	#shutdownHandler: ShutdownHandler = () => {};
 	#getMemoryFn?: () => MemoryRuntimeContext | undefined;
 	#commandDiagnostics: Array<{ type: string; message: string; path: string }> = [];
@@ -534,6 +538,54 @@ export class ExtensionRunner {
 		return undefined;
 	}
 
+	static disposeExtensions(extensions: readonly Extension[]): void {
+		for (const extension of extensions) {
+			try {
+				extension.disposeEventSubscriptions();
+			} catch (error) {
+				logger.warn("Extension event subscription disposal failed", {
+					extensionPath: extension.path,
+					error: String(error),
+				});
+			}
+		}
+	}
+
+	replaceExtensions(fresh: Extension[]): void {
+		try {
+			for (const extension of fresh) {
+				extension.activateEventSubscriptions();
+			}
+		} catch (error) {
+			ExtensionRunner.disposeExtensions(fresh);
+			throw error;
+		}
+		ExtensionRunner.disposeExtensions(this.extensions);
+		this.extensions.splice(0, this.extensions.length, ...fresh);
+	}
+
+	setExtensionsReloader(reloader: (options?: ExtensionsReloadOptions) => Promise<ExtensionsReloadReport>): void {
+		this.#extensionsReloader = reloader;
+	}
+
+	onExtensionsReloaded(listener: (report: ExtensionsReloadReport) => void): () => void {
+		this.#extensionsReloadListeners.add(listener);
+		return () => this.#extensionsReloadListeners.delete(listener);
+	}
+
+	#notifyExtensionsReloaded(report: ExtensionsReloadReport): void {
+		if (report.aborted) {
+			return;
+		}
+		for (const listener of this.#extensionsReloadListeners) {
+			try {
+				listener(report);
+			} catch (error) {
+				logger.error("Extension reload listener failed", { error: String(error) });
+			}
+		}
+	}
+
 	/** Creates an extension context, optionally scoped to a provider request model. */
 	createContext(model?: Model): ExtensionContext {
 		const getModel = model ? () => model : this.#getModel;
@@ -559,6 +611,25 @@ export class ExtensionRunner {
 			setInterval: (callback, ms, ...args) => this.#managedTimers.setInterval(callback, ms, ...args),
 			setTimeout: (callback, ms, ...args) => this.#managedTimers.setTimeout(callback, ms, ...args),
 			clearTimer: timer => this.#managedTimers.clear(timer),
+			invokeCommand: async (name, args = "") => {
+				const command = this.getCommand(name);
+				if (!command) {
+					throw new Error(`Unknown command: /${name}`);
+				}
+				return await command.handler(args, this.createCommandContext());
+			},
+			getInvocableCommands: () =>
+				this.getRegisteredCommands()
+					.filter(command => command.modelInvocable === true)
+					.map(command => ({ name: command.name, description: command.description })),
+			reloadExtensions: async options => {
+				if (!this.#extensionsReloader) {
+					throw new Error("Extension hot reload is not available in this session.");
+				}
+				const report = await this.#extensionsReloader(options);
+				this.#notifyExtensionsReloaded(report);
+				return report;
+			},
 		};
 	}
 
