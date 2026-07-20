@@ -31,6 +31,7 @@ import {
 	getProjectDir,
 	isCompiledBinary,
 	parseFrontmatter as parseOmpFrontmatter,
+	procmgr,
 } from "@oh-my-pi/pi-utils";
 import { getPackageDir as getOmpPackageDir } from "../config";
 import { formatKeyHints } from "../config/keybindings";
@@ -1569,3 +1570,19 @@ export type LsToolResultEvent = ToolResultEvent & { toolName: "ls" };
 export function isLsToolResult(e: ToolResultEvent): e is LsToolResultEvent {
 	return e.toolName === "ls";
 }
+
+// ---------------------------------------------------------------------------
+// Package-root helpers that upstream Pi exports from `pi-coding-agent` but
+// OMP's index does not re-export. Legacy extensions (e.g.
+// @howaboua/pi-codex-conversion) import these from the package root; bridge
+// them to their OMP homes so plugin validation and runtime resolution succeed.
+// ---------------------------------------------------------------------------
+export { renderDiff } from "../modes/components/diff";
+export { keyHint } from "../modes/components/keybinding-hints";
+export { truncateToVisualLines } from "../modes/components/visual-truncate";
+export { getSettingsListTheme } from "../modes/theme/theme";
+export { convertToLlm } from "../session/messages";
+export { buildSessionContext } from "../session/session-context";
+
+/** Upstream Pi exports `getShellConfig` from the package root; OMP keeps it in pi-utils' procmgr. */
+export const getShellConfig = procmgr.getShellConfig;
