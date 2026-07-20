@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import type { ApiKeyResolver, FetchImpl, UsageProvider } from "@oh-my-pi/pi-ai";
-import { registerCustomApi, unregisterCustomApis } from "@oh-my-pi/pi-ai/api-registry";
+import { isBuiltinApi, registerCustomApi, unregisterCustomApis } from "@oh-my-pi/pi-ai/api-registry";
 import { registerOAuthProvider, unregisterOAuthProvider, unregisterOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai/oauth/types";
 import { setCodexAttestationProvider } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
@@ -2556,7 +2556,19 @@ export class ModelRegistry {
 			"runtime-register",
 		);
 
-		if (config.streamSimple && config.api) {
+		if (config.streamSimple && config.api && isBuiltinApi(config.api)) {
+			// Legacy-Pi compat: extensions written before the host implemented this
+			// API natively (e.g. pi-codex-conversion's `openai-codex-responses`
+			// provider) try to re-register it with their own transport. Keep the
+			// native implementation — it is integrated with host auth and
+			// compaction — and ignore the extension's stream + OAuth override.
+			logger.warn(
+				`Provider ${providerName}: API "${config.api}" is built-in; ignoring the extension's stream/OAuth override in favor of the native implementation.`,
+				{ providerName, api: config.api, sourceId },
+			);
+			const { streamSimple: _stream, oauth: _oauth, ...rest } = config;
+			config = rest;
+		} else if (config.streamSimple && config.api) {
 			const streamSimple = config.streamSimple;
 			registerCustomApi(config.api, streamSimple, sourceId, (model, context, options) =>
 				streamSimple(model, context, options as SimpleStreamOptions),
