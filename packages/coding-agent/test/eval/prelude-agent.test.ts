@@ -41,6 +41,9 @@ describe("eval js agent() handle", () => {
 			handle: "agent://abc123",
 			id: "abc123",
 			agent: "task",
+			// Resolved model rides the node so silent substitution is visible at
+			// the call site (2026-07-19: a terra request ran fable, undetected).
+			model: "m",
 		});
 	});
 
