@@ -1552,10 +1552,12 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 					const eventContent = isRecord(event) && "content" in event ? event.content : undefined;
 					const messageContent = getMessageContent(event.message) || eventContent;
 					if (messageContent && Array.isArray(messageContent)) {
+						const turnTexts: string[] = [];
 						for (const block of messageContent) {
 							if (!isRecord(block)) continue;
 							if (block.type === "text" && typeof block.text === "string") {
 								outputChunks.push(block.text);
+								turnTexts.push(block.text);
 								continue;
 							}
 							if (block.type !== "toolCall" || typeof block.name !== "string") continue;
@@ -1563,6 +1565,18 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 								yieldCallPending = true;
 								flushProgress = true;
 							}
+						}
+						// Newest non-empty assistant text wins. captureSalvage reads
+						// only the FINAL message, and a `useLastTurn` finalize
+						// typically happens on an idle-reminder turn whose assistant
+						// message is a bare yield call — the real answer sits one
+						// message back and was discarded (receipt 2026-07-20: five
+						// EvalAgent children answered in text, yielded
+						// `{type:"result",result:{}}`, and failed missingData with
+						// the answer in hand).
+						const turnText = turnTexts.join("\n").trim();
+						if (turnText) {
+							lastAssistantSalvageText = turnText;
 						}
 					}
 					if (softRequestBudget > 0 && !abortSent && !yieldCallPending) {
