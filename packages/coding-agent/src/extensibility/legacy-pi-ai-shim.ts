@@ -22,7 +22,8 @@
 import {
 	type Api,
 	type AssistantMessage,
-	type AssistantMessageEventStream,
+	type AssistantMessageEvent,
+	AssistantMessageEventStream,
 	type Context,
 	type Model,
 	type SimpleStreamOptions,
@@ -159,3 +160,133 @@ export function streamSimpleOpenAIResponses(
  */
 export { isContextOverflow } from "@oh-my-pi/pi-ai/error";
 export { parseJsonWithRepair, parseStreamingJson, repairJson } from "@oh-my-pi/pi-utils";
+
+// ---------------------------------------------------------------------------
+// Upstream pi-ai helpers OMP never carried: `lazyApi`/`lazyStream`
+// (api/lazy.ts) and the assistant-message diagnostics utilities
+// (utils/diagnostics.ts). Faithful ports so legacy provider extensions
+// (e.g. @howaboua/pi-codex-conversion) register cleanly.
+// ---------------------------------------------------------------------------
+
+/** Minimal provider-stream module shape used by `lazyApi`. */
+export interface LegacyProviderStreams {
+	stream: (model: Model<Api>, context: unknown, options?: unknown) => AsyncIterable<AssistantMessageEvent>;
+	streamSimple: (model: Model<Api>, context: unknown, options?: unknown) => AsyncIterable<AssistantMessageEvent>;
+}
+
+function createSetupErrorMessage(model: Model<Api>, error: unknown): AssistantMessage {
+	const message: AssistantMessage = {
+		role: "assistant",
+		content: [],
+		api: model.api,
+		provider: model.provider,
+		model: model.id,
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "error",
+		errorMessage: error instanceof Error ? error.message : String(error),
+		timestamp: Date.now(),
+	};
+	return message;
+}
+
+function hasResult(source: AsyncIterable<AssistantMessageEvent>): source is AsyncIterable<AssistantMessageEvent> & {
+	result(): Promise<AssistantMessage>;
+} {
+	return "result" in source && typeof source.result === "function";
+}
+
+async function forwardStream(
+	target: AssistantMessageEventStream,
+	source: AsyncIterable<AssistantMessageEvent>,
+): Promise<void> {
+	for await (const event of source) {
+		target.push(event);
+	}
+	target.end(hasResult(source) ? await source.result() : undefined);
+}
+
+/**
+ * Returns a stream synchronously while running async setup (auth resolution,
+ * lazy module loading) behind it. Setup failures terminate the stream with an
+ * error event.
+ */
+export function lazyStream(
+	model: Model<Api>,
+	setup: () => Promise<AsyncIterable<AssistantMessageEvent>>,
+): AssistantMessageEventStream {
+	const outer = new AssistantMessageEventStream();
+	setup()
+		.then(inner => forwardStream(outer, inner))
+		.catch((error: unknown) => {
+			const message = createSetupErrorMessage(model, error);
+			outer.push({ type: "error", reason: "error", error: message });
+			outer.end(message);
+		});
+	return outer;
+}
+
+/**
+ * Wraps a dynamically imported API implementation module as provider streams.
+ * The module loads on first stream call; the host's import cache deduplicates
+ * loads. Load failures terminate the returned stream with an error event.
+ */
+export function lazyApi(load: () => Promise<LegacyProviderStreams>): LegacyProviderStreams {
+	return {
+		stream: (model, context, options) => lazyStream(model, async () => (await load()).stream(model, context, options)),
+		streamSimple: (model, context, options) =>
+			lazyStream(model, async () => (await load()).streamSimple(model, context, options)),
+	};
+}
+
+export interface DiagnosticErrorInfo {
+	name?: string;
+	message: string;
+	stack?: string;
+	code?: string | number;
+}
+
+export interface AssistantMessageDiagnostic {
+	type: string;
+	timestamp: number;
+	error?: DiagnosticErrorInfo;
+	details?: Record<string, unknown>;
+}
+
+export function formatThrownValue(value: unknown): string {
+	if (value instanceof Error) return value.message || value.name;
+	if (typeof value === "string") return value;
+	return String(value);
+}
+
+export function extractDiagnosticError(error: unknown): DiagnosticErrorInfo {
+	if (!(error instanceof Error)) return { name: "ThrownValue", message: formatThrownValue(error) };
+	const code = (error as { code?: unknown }).code;
+	return {
+		name: error.name || undefined,
+		message: error.message || error.name,
+		stack: error.stack,
+		code: typeof code === "string" || typeof code === "number" ? code : undefined,
+	};
+}
+
+export function createAssistantMessageDiagnostic(
+	type: string,
+	error: unknown,
+	details?: Record<string, unknown>,
+): AssistantMessageDiagnostic {
+	return { type, timestamp: Date.now(), error: extractDiagnosticError(error), details };
+}
+
+export function appendAssistantMessageDiagnostic<T extends { diagnostics?: AssistantMessageDiagnostic[] }>(
+	message: T,
+	diagnostic: AssistantMessageDiagnostic,
+): void {
+	message.diagnostics = [...(message.diagnostics ?? []), diagnostic];
+}
