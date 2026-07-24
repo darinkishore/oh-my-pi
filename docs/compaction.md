@@ -240,6 +240,7 @@ Prompt selection:
 
 Remote summarization modes:
 
+- `compaction.remoteStrategy: "context-full"` overrides the automatic strategy while the active model advertises native Responses streaming compaction and both remote compaction settings are enabled. This permits a global fallback such as `strategy: "handoff"` for other models. `strategy: "off"` remains authoritative, and the capability is resolved from the live model on every maintenance attempt so model switches take effect immediately.
 - If `compaction.remoteEndpoint` is set and remote compaction is enabled, local summary generation POSTs one of two wire formats:
   - custom omp summarizer endpoints receive `{ systemPrompt, prompt }` and must return JSON containing at least `{ summary }`.
   - OpenAI-compatible endpoints whose path ends in `/chat/completions` receive `{ model, messages, stream: false }`, where `messages` contains one system prompt and one user prompt. The summary is read from `choices[0].message.content`, which lets self-hosted servers such as llama.cpp and vLLM act as remote compactors without a separate summarizer shim.
@@ -407,6 +408,7 @@ From `settings-schema.ts`:
 
 - `compaction.enabled` = `true`
 - `compaction.strategy` = `"snapcompact"` (`"context-full"`, `"handoff"`, `"shake"`, and `"off"` are also supported)
+- `compaction.remoteStrategy` = `"inherit"` (`"context-full"` selects provider-native Responses streaming compaction when the active model supports it)
 - `compaction.reserveTokens` = `16384`
 - `compaction.keepRecentTokens` = `20000`
 - `compaction.autoContinue` = `true`

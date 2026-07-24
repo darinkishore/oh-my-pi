@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Changed cache-capable Amazon Bedrock models to default to a 1-hour prompt-cache retention, preventing the full prefix from expiring while agent tools or delegated work run longer than five minutes. Explicit `cacheRetention` values and `PI_CACHE_RETENTION` continue to override the default.
+
 ## [17.0.5] - 2026-07-18
 
 ### Changed

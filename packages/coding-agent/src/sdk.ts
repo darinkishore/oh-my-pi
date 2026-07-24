@@ -427,6 +427,8 @@ export interface CreateAgentSessionOptions {
 	providerPromptCacheKey?: string;
 	/** Whether `providerPromptCacheKey` is caller-pinned or inherited from a full fork. */
 	providerPromptCacheKeySource?: "explicit" | "fork";
+	/** Override the configured OpenAI Codex transport preference for this session. */
+	preferWebsockets?: boolean;
 	/** Absolute wall-clock deadline in Unix epoch milliseconds. */
 	deadline?: number;
 
@@ -2767,7 +2769,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 		const openaiWebsocketSetting = settings.get("providers.openaiWebsockets") ?? "off";
 		const preferOpenAICodexWebsockets =
-			openaiWebsocketSetting === "on" ? true : openaiWebsocketSetting === "off" ? false : undefined;
+			options.preferWebsockets ??
+			(openaiWebsocketSetting === "on" ? true : openaiWebsocketSetting === "off" ? false : undefined);
 		const initialServiceTierByFamily = hasServiceTierEntry
 			? (existingSession.serviceTier ?? {})
 			: buildServiceTierByFamily(

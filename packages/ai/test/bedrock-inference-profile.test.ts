@@ -63,6 +63,73 @@ function bedrockModel(id: string): Model<"bedrock-converse-stream"> {
 	});
 }
 
+type CachePoint = { type: "default"; ttl?: "1h" };
+
+interface CapturedBedrockPayload {
+	messages?: Array<{ content?: Array<{ cachePoint?: CachePoint }> }>;
+	system?: Array<{ cachePoint?: CachePoint }>;
+}
+
+async function capturedPayload(
+	model: Model<"bedrock-converse-stream">,
+	cacheRetention?: "long" | "none" | "short",
+): Promise<CapturedBedrockPayload> {
+	let payload: CapturedBedrockPayload | undefined;
+	const customFetch: FetchImpl = Object.assign(async () => new Response("nope", { status: 418 }), {
+		preconnect: fetch.preconnect,
+	});
+	await streamBedrock(
+		model,
+		{ ...userContext(), systemPrompt: ["Stay concise."] },
+		{
+			bearerToken: "test-token",
+			cacheRetention,
+			fetch: customFetch,
+			maxTokens: 16,
+			onPayload: request => {
+				payload = request as CapturedBedrockPayload;
+			},
+		},
+	).result();
+	if (!payload) throw new Error("Bedrock request payload was not captured");
+	return payload;
+}
+
+function payloadCachePoints(payload: CapturedBedrockPayload): CachePoint[] {
+	const points: CachePoint[] = [];
+	for (const block of payload.system ?? []) {
+		if (block.cachePoint) points.push(block.cachePoint);
+	}
+	for (const message of payload.messages ?? []) {
+		for (const block of message.content ?? []) {
+			if (block.cachePoint) points.push(block.cachePoint);
+		}
+	}
+	return points;
+}
+
+describe("Bedrock prompt-cache retention", () => {
+	test("defaults cache-capable models to the one-hour TTL", async () => {
+		await withEnv({ PI_CACHE_RETENTION: undefined }, async () => {
+			const payload = await capturedPayload(bedrockModel("global.anthropic.claude-fable-5"));
+			expect(payloadCachePoints(payload)).toEqual([
+				{ type: "default", ttl: "1h" },
+				{ type: "default", ttl: "1h" },
+			]);
+		});
+	});
+
+	test("honors an explicit short retention override", async () => {
+		const payload = await capturedPayload(bedrockModel("global.anthropic.claude-fable-5"), "short");
+		expect(payloadCachePoints(payload)).toEqual([{ type: "default" }, { type: "default" }]);
+	});
+
+	test("honors an explicit cache disable", async () => {
+		const payload = await capturedPayload(bedrockModel("global.anthropic.claude-fable-5"), "none");
+		expect(payloadCachePoints(payload)).toEqual([]);
+	});
+});
+
 async function capturedRequestHost(
 	model: Model<"bedrock-converse-stream">,
 	options: { region?: string } = {},

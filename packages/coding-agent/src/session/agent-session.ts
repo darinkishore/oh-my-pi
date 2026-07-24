@@ -73,6 +73,7 @@ import {
 	type ShakeRegion,
 	type SummaryOptions,
 	shouldCompact,
+	shouldUseCompactionV2Streaming,
 	shouldUseOpenAiRemoteCompaction,
 } from "@oh-my-pi/pi-agent-core/compaction";
 import {
@@ -13889,6 +13890,21 @@ export class AgentSession {
 	 *   inline execution so the handoff completes before the new turn begins.
 	 * @returns whether auto-compaction scheduled a follow-up turn.
 	 */
+	#resolveAutoCompactionSettings() {
+		const settings = this.settings.getGroup("compaction");
+		if (
+			settings.strategy === "off" ||
+			settings.remoteStrategy !== "context-full" ||
+			!settings.remoteEnabled ||
+			!settings.remoteStreamingV2Enabled ||
+			!this.model ||
+			!shouldUseCompactionV2Streaming(this.model)
+		) {
+			return settings;
+		}
+		return { ...settings, strategy: "context-full" as const };
+	}
+
 	async #runAutoCompaction(
 		reason: "overflow" | "threshold" | "idle" | "incomplete",
 		willRetry: boolean,
@@ -13903,7 +13919,7 @@ export class AgentSession {
 			terminalTextAnswer?: boolean;
 		} = {},
 	): Promise<CompactionCheckResult> {
-		const compactionSettings = this.settings.getGroup("compaction");
+		const compactionSettings = this.#resolveAutoCompactionSettings();
 		if (compactionSettings.strategy === "off") return COMPACTION_CHECK_NONE;
 		if (reason !== "idle" && !compactionSettings.enabled) return COMPACTION_CHECK_NONE;
 		const generation = this.#promptGeneration;
@@ -18311,6 +18327,18 @@ export class AgentSession {
 }
 
 function describeToolParamsForAnnouncement(tool: AgentTool): unknown {
+	// Compare and announce the provider-visible schema, not the extension's raw
+	// schema object. `toolWireSchema` normalizes semantically equivalent forms
+	// (for example TypeBox's `additionalProperties: {}` to `true`) when a tool
+	// first enters the model-visible slate. Comparing that normalized live tool
+	// against a freshly reloaded raw definition otherwise reports a phantom
+	// schema change and retires an unchanged tool on every reload.
+	try {
+		return toolWireSchema(tool);
+	} catch {
+		// Preserve the existing best-effort fallback for malformed third-party
+		// schemas so reload reporting itself never aborts the transaction.
+	}
 	const parameters: unknown = tool.parameters;
 	if (parameters === undefined || parameters === null) {
 		return undefined;
@@ -18380,16 +18408,23 @@ function renameToolForVersioning(freshTool: AgentTool, versionedName: string): A
 
 function retireVersionedTool(previousTool: AgentTool, versionedName: string): AgentTool {
 	const retired = Object.create(previousTool) as AgentTool;
-	Object.defineProperty(retired, "execute", {
-		value: async () => ({
-			content: [
-				{
-					type: "text" as const,
-					text: `Tool "${previousTool.name}" changed schema during extension reload and was retired. Retry with "${versionedName}".`,
-				},
-			],
-			isError: true,
-		}),
+	Object.defineProperties(retired, {
+		// Provider request builders may require schema fields to be own
+		// properties when they cross a serialization boundary. Keeping `name`
+		// only on the prototype produced a nameless tool after hot reload and
+		// made Codex reject the entire next request.
+		name: { value: previousTool.name, enumerable: true },
+		execute: {
+			value: async () => ({
+				content: [
+					{
+						type: "text" as const,
+						text: `Tool "${previousTool.name}" changed schema during extension reload and was retired. Retry with "${versionedName}".`,
+					},
+				],
+				isError: true,
+			}),
+		},
 	});
 	return retired;
 }

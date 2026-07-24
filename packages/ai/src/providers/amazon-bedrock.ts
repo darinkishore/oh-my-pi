@@ -309,7 +309,13 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 		const region = resolveBedrockRegion(model.id, options);
 
 		try {
-			const cacheRetention = resolveCacheRetention(options.cacheRetention);
+			// Agent turns routinely pause for more than Bedrock's five-minute
+			// default cache TTL while tools or delegated agents run. Match the
+			// Anthropic transport: cache-capable models default to the supported
+			// one-hour TTL, while an explicit option or PI_CACHE_RETENTION still
+			// wins in either direction.
+			const defaultCacheRetention = supportsPromptCaching(model) ? "long" : "short";
+			const cacheRetention = resolveCacheRetention(options.cacheRetention, defaultCacheRetention);
 			const convertedMessages = convertMessages(context, model, cacheRetention);
 			const toolPlan = planToolConfig(context.tools, options.toolChoice, convertedMessages);
 			const toolConfig = toolPlan.toolConfig;
