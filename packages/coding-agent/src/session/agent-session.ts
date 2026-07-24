@@ -6062,9 +6062,9 @@ export class AgentSession implements SettingsScope {
 			this.#extensionToolVersionCounters.set(name, version);
 			registerDeferred(renameToolForVersioning(freshTool, versionedName));
 			if (retirePrevious) {
-				const previousTool = this.#toolRegistry.get(name);
+				const previousTool = registry.get(name);
 				if (previousTool) {
-					this.#toolRegistry.set(name, retireVersionedTool(previousTool, versionedName));
+					registry.set(name, retireVersionedTool(previousTool, versionedName));
 				}
 			}
 			report.versioned.push({ name, versionedName });
