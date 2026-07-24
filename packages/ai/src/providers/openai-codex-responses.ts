@@ -125,6 +125,7 @@ import {
 	applyReasoningSummaryDone,
 	buildResponsesDeltaInput,
 	describeResponsesDeltaMismatch,
+	summarizeResponsesInputItems,
 	computerCallMetadata,
 	convertResponsesAssistantMessage,
 	convertResponsesInputContent,
@@ -3796,6 +3797,9 @@ function buildCodexChainedRequestBody(
 						state.lastResponseItems,
 						requestBody,
 					),
+					prevInputMap: summarizeResponsesInputItems(state.lastRequest?.input),
+					currentInputMap: summarizeResponsesInputItems(requestBody.input),
+					prevResponseItemsMap: summarizeResponsesInputItems(state.lastResponseItems, 6),
 				},
 			);
 		}
