@@ -1055,9 +1055,20 @@ export class ExtensionRunner {
 				const handlers = ext.handlers.get(event.type);
 				if (!handlers || handlers.length === 0) continue;
 				ctx ??= this.createContext();
-				for (const handler of handlers) {
-					promises.push(this.#runHandlerWithTimeout(handler, event, ctx, ext, timeoutMs));
-				}
+				// Parallel ACROSS extensions, sequential WITHIN one extension: an
+				// extension's shutdown handlers share state (e.g. a flush handler
+				// registered before a close-stores handler), and racing them via a
+				// flat Promise.all let the close land mid-flush ("Cannot use a
+				// closed database" on reload/relaunch). Registration order is the
+				// contract every other event type already honors.
+				const extCtx = ctx;
+				promises.push(
+					(async () => {
+						for (const handler of handlers) {
+							await this.#runHandlerWithTimeout(handler, event, extCtx, ext, timeoutMs);
+						}
+					})(),
+				);
 			}
 			if (promises.length > 0) await Promise.all(promises);
 			return result as RunnerEmitResult<TEvent>;

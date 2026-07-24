@@ -118,6 +118,33 @@ describe("ExtensionRunner", () => {
 		expect(runner.createContext().cwd).toBe(dirB);
 	});
 
+	describe("session_shutdown ordering", () => {
+		it("runs one extension's shutdown handlers sequentially in registration order", async () => {
+			const extCode = `
+				const order = [];
+				globalThis.__shutdownOrderProbe = order;
+				export default function(pi) {
+					pi.on("session_shutdown", async () => {
+						order.push("flush:start");
+						await new Promise(resolve => setTimeout(resolve, 30));
+						order.push("flush:end");
+					});
+					pi.on("session_shutdown", async () => {
+						order.push("close:start");
+					});
+				}
+			`;
+			fs.writeFileSync(path.join(extensionsDir, "shutdown-order.ts"), extCode);
+
+			const result = await loadTestExtensions();
+			const runner = new ExtensionRunner(result.extensions, result.runtime, tempDir.path(), sessionManager);
+			await runner.emit({ type: "session_shutdown" });
+			const order = (globalThis as { __shutdownOrderProbe?: string[] }).__shutdownOrderProbe;
+			expect(order).toEqual(["flush:start", "flush:end", "close:start"]);
+			delete (globalThis as { __shutdownOrderProbe?: string[] }).__shutdownOrderProbe;
+		});
+	});
+
 	describe("shortcut conflicts", () => {
 		it("warns when extension shortcut conflicts with built-in", async () => {
 			const extCode = `

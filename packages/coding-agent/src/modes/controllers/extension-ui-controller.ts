@@ -1,5 +1,6 @@
 import type { Component, OverlayHandle, TUI } from "@oh-my-pi/pi-tui";
 import { Container, Spacer, Text } from "@oh-my-pi/pi-tui";
+import { logger } from "@oh-my-pi/pi-utils";
 import type { CollabUiRequestDraft, CollabUiSelectItem } from "@oh-my-pi/pi-wire";
 import { KeybindingsManager } from "../../config/keybindings";
 import type {
@@ -286,6 +287,14 @@ export class ExtensionUiController {
 
 		// Subscribe to extension errors
 		extensionRunner.onError((error: ExtensionError) => {
+			// The transient UI banner drops the stack; without this log line every
+			// recurrence of an extension error is undiagnosable after the fact.
+			logger.error("Extension handler error", {
+				extensionPath: error.extensionPath,
+				event: error.event,
+				error: error.error,
+				stack: error.stack,
+			});
 			this.showExtensionError(error.extensionPath, error.error);
 		});
 
