@@ -3500,6 +3500,39 @@ export function buildResponsesDeltaInput<TItem extends ResponseInputItem | Input
 }
 
 /**
+ * Compact one-line-per-item map of a Responses `input` array for chain-break
+ * diagnostics: index, item type/role, and a short content head for message
+ * items (enough to identify WHICH message moved — e.g. crew-mail `#NNNN`
+ * prefixes — without dumping bodies).
+ */
+export function summarizeResponsesInputItems(
+	items: readonly unknown[] | undefined,
+	max = 16,
+): string[] {
+	if (!Array.isArray(items)) return ["<no input array>"];
+	const lines = items.slice(0, max).map((raw, i) => {
+		const item = (raw ?? {}) as Record<string, unknown>;
+		const type = String(item.type ?? item.role ?? "?");
+		const role = item.role && item.type ? `/${String(item.role)}` : "";
+		let hint = "";
+		const content = item.content;
+		if (typeof content === "string") {
+			hint = content;
+		} else if (Array.isArray(content)) {
+			const firstText = content.find(
+				(part): part is { text: string } =>
+					!!part && typeof (part as { text?: unknown }).text === "string",
+			);
+			hint = firstText?.text ?? "";
+		}
+		hint = hint.replace(/\s+/g, " ").trim().slice(0, 48);
+		return `[${i}]${type}${role}${hint ? `:"${hint}"` : ""}`;
+	});
+	if (items.length > max) lines.push(`… +${items.length - max} more`);
+	return lines;
+}
+
+/**
  * Explain why {@link buildResponsesDeltaInput} returned null, without leaking
  * item content: names the differing top-level option keys, or the first
  * divergent item's combined index with both sides' `type` and key sets.
