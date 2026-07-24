@@ -3569,6 +3569,124 @@ describe("openai-codex streaming", () => {
 		).toBe(false);
 	});
 
+	it("keeps chaining across turns when streamed reasoning items carry server turn metadata", async () => {
+		// Regression: the real Codex backend attaches `metadata`/`internal_chat_message_metadata_passthrough`
+		// (rotating turn_id) to streamed output items. The replay sanitizer strips
+		// them when history is rebuilt, so an unsanitized append baseline never
+		// deep-equals the replayed history and the previous_response_id chain
+		// silently breaks on every turn — full context re-sent each call.
+		const tempDir = TempDir.createSync("@pi-codex-stream-");
+		setAgentDir(tempDir.path());
+		const token = createCodexTestToken();
+		const sentRequests: Array<Record<string, unknown>> = [];
+		const fetchMock = vi.fn(async () => {
+			throw new Error("SSE fallback should not be called");
+		});
+
+		class MetadataWebSocket extends MockWebSocket {
+			constructor(url: string, options?: { headers?: WsHeaders }) {
+				super(url, options);
+				this.scheduleOpen();
+			}
+
+			send(data: string): void {
+				sentRequests.push(JSON.parse(data) as Record<string, unknown>);
+				const n = sentRequests.length;
+				const serverMetadata = { turn_id: `turn-${n}` };
+				this.sendJson({ type: "response.created", response: { id: `resp_${n}` } });
+				this.sendJson({
+					type: "response.output_item.done",
+					item: {
+						id: `rs_${n}`,
+						type: "reasoning",
+						summary: [],
+						content: [],
+						encrypted_content: `enc_${n}`,
+						internal_chat_message_metadata_passthrough: serverMetadata,
+						metadata: serverMetadata,
+					},
+				});
+				this.sendJson({
+					type: "response.output_item.added",
+					item: { type: "message", id: `msg_${n}`, role: "assistant", status: "in_progress", content: [] },
+				});
+				this.sendJson({ type: "response.content_part.added", part: { type: "output_text", text: "" } });
+				this.sendJson({ type: "response.output_text.delta", delta: `Answer ${n}` });
+				this.sendJson({
+					type: "response.output_item.done",
+					item: {
+						type: "message",
+						id: `msg_${n}`,
+						role: "assistant",
+						status: "completed",
+						content: [{ type: "output_text", text: `Answer ${n}` }],
+						internal_chat_message_metadata_passthrough: serverMetadata,
+						metadata: serverMetadata,
+					},
+				});
+				this.sendJson({
+					type: "response.completed",
+					response: { id: `resp_${n}`, status: "completed", usage: DEFAULT_USAGE },
+				});
+			}
+		}
+
+		global.WebSocket = MetadataWebSocket as unknown as typeof WebSocket;
+		const model: Model<"openai-codex-responses"> = buildModel({
+			id: "gpt-5.3-codex-spark",
+			name: "GPT-5.3 Codex Spark",
+			api: "openai-codex-responses",
+			provider: "openai-codex",
+			baseUrl: "https://chatgpt.com/backend-api",
+			reasoning: true,
+			preferWebsockets: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128000,
+			maxTokens: 128000,
+		});
+		const providerSessionState = new Map<string, ProviderSessionState>();
+		const firstContext: Context = {
+			systemPrompt: ["You are a helpful assistant."],
+			messages: [{ role: "user", content: "First question", timestamp: Date.now() }],
+		};
+		const firstResponse = await streamOpenAICodexResponses(model, firstContext, {
+			fetch: fetchMock as FetchImpl,
+			apiKey: token,
+			sessionId: "ws-metadata-session",
+			providerSessionState,
+		}).result();
+		expect(firstResponse.stopReason).toBe("stop");
+		const secondContext: Context = {
+			systemPrompt: ["You are a helpful assistant."],
+			messages: [
+				...firstContext.messages,
+				firstResponse,
+				{ role: "user", content: "Second question", timestamp: Date.now() },
+			],
+		};
+		const secondResponse = await streamOpenAICodexResponses(model, secondContext, {
+			fetch: fetchMock as FetchImpl,
+			apiKey: token,
+			sessionId: "ws-metadata-session",
+			providerSessionState,
+		}).result();
+		expect(secondResponse.stopReason).toBe("stop");
+
+		expect(sentRequests).toHaveLength(2);
+		expect(sentRequests[0]?.previous_response_id).toBeUndefined();
+		// The second turn must chain: the append baseline must survive the
+		// sanitizer's turn-metadata strip during history replay.
+		expect(sentRequests[1]?.previous_response_id).toBe("resp_1");
+		const deltaInput = sentRequests[1]?.input;
+		expect(Array.isArray(deltaInput)).toBe(true);
+		const deltaItems = deltaInput as Array<{ role?: string }>;
+		expect(deltaItems).toHaveLength(1);
+		expect(deltaItems[0]?.role).toBe("user");
+		expect(JSON.stringify(deltaItems)).toContain("Second question");
+		expect(JSON.stringify(deltaItems)).not.toContain("Answer 1");
+	});
+
 	it("drops a stale terminal frame from the prior response leaking onto a reused websocket", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stale-frame-");
 		setAgentDir(tempDir.path());

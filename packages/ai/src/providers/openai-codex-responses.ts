@@ -2435,12 +2435,21 @@ class CodexStreamProcessor {
 				resetCodexWebSocketAppendState(state);
 			} else {
 				state.lastRequest = structuredCloneJSON(runtime.requestBodyForState);
+				// The append baseline must byte-match what the converter will emit
+				// when it replays this turn from providerPayload next call: the
+				// replay sanitizer drops server-minted reasoning metadata
+				// (`metadata`, `internal_chat_message_metadata_passthrough`) and
+				// item ids, so a raw streamed baseline never deep-equals the
+				// replayed history and the chain silently breaks every turn.
 				const replayableResponseItems = sanitizeOpenAIResponsesAssistantHistoryItemsForReplay(
 					structuredCloneJSON(runtime.nativeOutputItems),
 				);
 				if (responseId && replayableResponseItems) {
 					state.lastResponseId = responseId;
-					state.lastResponseItems = replayableResponseItems;
+					state.lastResponseItems = unrollCodexComputerItems(
+						replayableResponseItems,
+						this.model.compat.supportsImageDetailOriginal,
+					) as InputItem[];
 					state.canAppend = rawEvent.type === "response.done" || rawEvent.type === "response.completed";
 				} else {
 					// Without both a response id and replayable output, the append baseline cannot be trusted.
