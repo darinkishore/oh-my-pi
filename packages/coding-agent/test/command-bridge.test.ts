@@ -6,6 +6,7 @@ import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { buildToolsMarkdown } from "@oh-my-pi/pi-coding-agent/modes/utils/tools-markdown";
 import { createAgentSession, discoverAuthStorage } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
@@ -110,7 +111,7 @@ describe("command tool extension reload", () => {
 		removeSyncWithRetries(authDirectory);
 	});
 
-	async function createProbeSession(options?: { secondExtension?: string }): Promise<{
+	async function createProbeSession(options?: { secondExtension?: string; parametersSource?: string }): Promise<{
 		session: AgentSession;
 		entryPath: string;
 		valuePath: string;
@@ -131,7 +132,7 @@ describe("command tool extension reload", () => {
 				'    name: "probe",',
 				'    label: "probe",',
 				'    description: "returns the probe value",',
-				'    parameters: { type: "object", properties: {} },',
+				`    parameters: ${options?.parametersSource ?? '{ type: "object", properties: {} }'},`,
 				"    async execute() {",
 				'      return { content: [{ type: "text", text: PROBE_VALUE }] };',
 				"    },",
@@ -245,6 +246,26 @@ describe("command tool extension reload", () => {
 		}
 	});
 
+	it("does not retire an unchanged tool after wire-schema normalization", async () => {
+		const { session } = await createProbeSession({
+			parametersSource: '{ type: "object", properties: { extra: { type: "object", additionalProperties: {} } } }',
+		});
+		try {
+			const runner = session.extensionRunner;
+			if (!runner) {
+				throw new Error("extension runner missing");
+			}
+
+			const report = await runner.createContext().reloadExtensions();
+			expect(report.versioned).toEqual([]);
+			expect(report.refreshed).toContain("probe");
+			expect(session.getDeferredExtensionToolByName("probe_v2")).toBeUndefined();
+			expect(await readTextResult(session.getToolByName("probe"))).toBe("probe-v1");
+		} finally {
+			await session.dispose();
+		}
+	});
+
 	it("exposes only reload-deferred tools through the extra-tool resolver", async () => {
 		const { session, entryPath, valuePath } = await createProbeSession();
 		try {
@@ -288,6 +309,7 @@ describe("command tool extension reload", () => {
 	it("retires an incompatible tool closure and directs calls to its versioned replacement", async () => {
 		const { session, entryPath } = await createProbeSession();
 		try {
+			await session.setActiveToolsByName(["probe"]);
 			writeFileSync(
 				entryPath,
 				[
@@ -318,6 +340,14 @@ describe("command tool extension reload", () => {
 			if (!retired) {
 				throw new Error("retired probe tool missing");
 			}
+			expect(Object.hasOwn(retired, "name")).toBe(true);
+			expect(retired.name).toBe("probe");
+			const toolsBeforeRendering = session.agent.state.tools;
+			const firstRendering = buildToolsMarkdown({ tools: toolsBeforeRendering });
+			const secondRendering = buildToolsMarkdown({ tools: toolsBeforeRendering });
+			expect(secondRendering).toBe(firstRendering);
+			expect(firstRendering).toContain("`probe`");
+			expect(session.agent.state.tools.find(tool => tool.name === "probe")?.name).toBe("probe");
 			const retiredResult = await retired.execute("retired-probe", {}, undefined, undefined);
 			expect(retiredResult.isError).toBe(true);
 			expect(retiredResult.content[0]).toEqual({
