@@ -470,6 +470,8 @@ type CodexWebSocketSessionState = {
 	lastFallbackAt?: number;
 	prewarmed: boolean;
 	stats: OpenAICodexWebSocketDebugStats;
+	/** Consecutive turns where an eligible append baseline failed to chain. */
+	appendResetStreak?: number;
 };
 
 interface CodexProviderSessionState extends ProviderSessionState {
@@ -3417,6 +3419,7 @@ function buildCodexChainedRequestBody(
 		? buildResponsesDeltaInput(state.lastRequest, state.lastResponseItems, requestBody)
 		: null;
 	if (appendInput && appendInput.length > 0 && state?.lastResponseId) {
+		state.appendResetStreak = 0;
 		return { ...requestBody, previous_response_id: state.lastResponseId, input: appendInput };
 	}
 	if (chainable && state) {
@@ -3430,9 +3433,23 @@ function buildCodexChainedRequestBody(
 		resetCodexWebSocketAppendState(state);
 		state.turnState = undefined;
 		state.modelsEtag = undefined;
+		// A single reset is normal (compaction, steer, options change). A streak
+		// means chaining has silently stopped engaging — every call re-sends and
+		// re-bills full context (the exact failure mode of the 2026-07 crew cache
+		// collapse), so escalate to a visible warning.
+		state.appendResetStreak = (state.appendResetStreak ?? 0) + 1;
+		if (state.appendResetStreak === CODEX_APPEND_RESET_WARN_STREAK) {
+			logger.warn(
+				"Codex websocket turn chaining has failed to engage repeatedly; requests are re-sending full context every call (prompt cache likely cold past the instructions prefix)",
+				{ consecutiveResets: state.appendResetStreak },
+			);
+		}
 	}
 	return requestBody;
 }
+
+/** Consecutive eligible-but-failed append attempts before a visible warning. */
+const CODEX_APPEND_RESET_WARN_STREAK = 3;
 
 function toWebSocketUrl(url: string): string {
 	const parsed = new URL(url);
