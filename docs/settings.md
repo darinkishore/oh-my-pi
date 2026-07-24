@@ -610,6 +610,7 @@ contextPromotion:
 compaction:
   enabled: true
   strategy: snapcompact # context-full, handoff, shake, snapcompact, off
+  remoteStrategy: inherit # context-full overrides strategy for native Responses V2 models
   midTurnEnabled: true # check thresholds between tool-loop provider requests
   thresholdPercent: -1 # -1 = default reserve-based behavior
   thresholdTokens: -1 # fixed token limit when > 0
@@ -625,6 +626,7 @@ memory:
 | `compaction.enabled`          | boolean | `true`        | Automatic conversation compaction.                                                                                                                                                                                                        |
 | `compaction.midTurnEnabled`   | boolean | `true`        | Check thresholds at safe mid-turn tool-loop boundaries before the next provider request.                                                                                                                                                  |
 | `compaction.strategy`         | enum    | `snapcompact` | `context-full`, `handoff`, `shake`, `snapcompact`, `off`.                                                                                                                                                                                 |
+| `compaction.remoteStrategy`   | enum    | `inherit`     | `context-full` overrides the automatic strategy only while the active model supports native Responses streaming compaction; `inherit` always uses `compaction.strategy`.                                                                 |
 | `compaction.thresholdPercent` | number  | `-1`          | Percent-of-context trigger; `-1` = reserve-based default.                                                                                                                                                                                 |
 | `compaction.thresholdTokens`  | number  | `-1`          | Fixed token trigger when `> 0`.                                                                                                                                                                                                           |
 | `compaction.reserveTokens`    | number  | _(unset)_     | Absolute reserve floor. When unset, the effective reserve is the larger of `16384` and 15% of the context window; if that default would leave no practical small-window budget, it falls back to the 15% reserve.                         |

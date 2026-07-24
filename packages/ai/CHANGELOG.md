@@ -361,6 +361,9 @@
 - Fixed Devin total-token usage omitting cache reads and cache writes.
 - Fixed model switches to Devin rejecting foreign provider response IDs, reasoning signatures, and empty interrupted turns as invalid Cascade history.
 - Classified zero-output Devin `invalid_argument` trailers as context overflow when the serialized message history is already large, routing cumulative tool-output payload failures through context maintenance—including artifact-backed shake rescue—instead of retrying the same rejected history.
+### Changed
+
+- Changed cache-capable Amazon Bedrock models to default to a 1-hour prompt-cache retention, preventing the full prefix from expiring while agent tools or delegated work run longer than five minutes. Explicit `cacheRetention` values and `PI_CACHE_RETENTION` continue to override the default.
 
 ## [17.0.5] - 2026-07-18
 

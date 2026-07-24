@@ -632,6 +632,63 @@ describe("AgentSession handoff", () => {
 		expect(downgradeNotice?.message).toContain("using context-full auto-compaction instead.");
 	});
 
+	it("keeps handoff for models without native streaming compaction", async () => {
+		session.settings.set("compaction.strategy", "handoff");
+		session.settings.set("compaction.remoteStrategy", "context-full");
+		const handoffSpy = vi.spyOn(session, "handoff").mockResolvedValue({ document: "handoff" });
+		const compactSpy = vi.spyOn(compactionModule, "compact");
+
+		await session.runIdleCompaction();
+
+		expect(handoffSpy).toHaveBeenCalledTimes(1);
+		expect(compactSpy).not.toHaveBeenCalled();
+		expect(events).toContainEqual({ type: "auto_compaction_start", reason: "idle", action: "handoff" });
+	});
+
+	it("uses context-full after switching to a native streaming compaction model", async () => {
+		const remoteModel = getBundledModel("openai-codex", "gpt-5.4");
+		if (!remoteModel) throw new Error("Expected built-in OpenAI Codex model to exist");
+		authStorage.setRuntimeApiKey(remoteModel.provider, "test-key");
+		await session.setModel(remoteModel);
+		session.settings.set("compaction.strategy", "handoff");
+		session.settings.set("compaction.remoteStrategy", "context-full");
+
+		const entries = sessionManager.getBranch();
+		const firstKeptEntryId = entries[entries.length - 1]?.id;
+		if (!firstKeptEntryId) throw new Error("Expected a seeded entry id");
+		const preparation: compactionModule.CompactionPreparation = {
+			firstKeptEntryId,
+			messagesToSummarize: [
+				{
+					role: "user",
+					content: [{ type: "text", text: "old context" }],
+					timestamp: 1,
+				},
+			],
+			turnPrefixMessages: [],
+			recentMessages: [],
+			isSplitTurn: false,
+			tokensBefore: 100,
+			fileOps: { read: new Set(), written: new Set(), edited: new Set() },
+			settings: { ...compactionModule.DEFAULT_COMPACTION_SETTINGS, strategy: "context-full" },
+		};
+		vi.spyOn(compactionModule, "prepareCompaction").mockReturnValue(preparation);
+		const compactSpy = vi.spyOn(compactionModule, "compact").mockResolvedValue({
+			summary: "compacted",
+			shortSummary: undefined,
+			firstKeptEntryId,
+			tokensBefore: 100,
+			details: {},
+		});
+		const handoffSpy = vi.spyOn(session, "handoff");
+
+		await session.runIdleCompaction();
+
+		expect(compactSpy).toHaveBeenCalledTimes(1);
+		expect(handoffSpy).not.toHaveBeenCalled();
+		expect(events).toContainEqual({ type: "auto_compaction_start", reason: "idle", action: "context-full" });
+	});
+
 	it("strips hook-supplied snapcompact data when persisting context-full compaction", async () => {
 		const localTempDir = TempDir.createSync("@pi-context-full-preserve-data-");
 		const localSessionManager = SessionManager.inMemory(localTempDir.path());

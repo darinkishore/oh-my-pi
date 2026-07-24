@@ -9196,6 +9196,18 @@ export class AgentSession {
 }
 
 function describeToolParamsForAnnouncement(tool: AgentTool): unknown {
+	// Compare and announce the provider-visible schema, not the extension's raw
+	// schema object. `toolWireSchema` normalizes semantically equivalent forms
+	// (for example TypeBox's `additionalProperties: {}` to `true`) when a tool
+	// first enters the model-visible slate. Comparing that normalized live tool
+	// against a freshly reloaded raw definition otherwise reports a phantom
+	// schema change and retires an unchanged tool on every reload.
+	try {
+		return toolWireSchema(tool);
+	} catch {
+		// Preserve the existing best-effort fallback for malformed third-party
+		// schemas so reload reporting itself never aborts the transaction.
+	}
 	const parameters: unknown = tool.parameters;
 	if (parameters === undefined || parameters === null) {
 		return undefined;
@@ -9265,16 +9277,23 @@ function renameToolForVersioning(freshTool: AgentTool, versionedName: string): A
 
 function retireVersionedTool(previousTool: AgentTool, versionedName: string): AgentTool {
 	const retired = Object.create(previousTool) as AgentTool;
-	Object.defineProperty(retired, "execute", {
-		value: async () => ({
-			content: [
-				{
-					type: "text" as const,
-					text: `Tool "${previousTool.name}" changed schema during extension reload and was retired. Retry with "${versionedName}".`,
-				},
-			],
-			isError: true,
-		}),
+	Object.defineProperties(retired, {
+		// Provider request builders may require schema fields to be own
+		// properties when they cross a serialization boundary. Keeping `name`
+		// only on the prototype produced a nameless tool after hot reload and
+		// made Codex reject the entire next request.
+		name: { value: previousTool.name, enumerable: true },
+		execute: {
+			value: async () => ({
+				content: [
+					{
+						type: "text" as const,
+						text: `Tool "${previousTool.name}" changed schema during extension reload and was retired. Retry with "${versionedName}".`,
+					},
+				],
+				isError: true,
+			}),
+		},
 	});
 	return retired;
 }

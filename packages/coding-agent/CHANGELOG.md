@@ -946,10 +946,15 @@
 - Fixed the Cursor-backed advisor losing entire turns when it selected server-native tools (`bash`, `grep`, etc.) outside its grant: exec-resolved native blocks are already rejected in-band by the advisor-scoped bridge, so they no longer trip the unavailable-tool quarantine and discard the `advise` emitted in the same turn ([#5900](https://github.com/can1357/oh-my-pi/issues/5900)).
 - Fixed custom `anthropic-messages` OAuth providers being unable to opt into configured Claude Code fingerprint header overrides. ([#5888](https://github.com/can1357/oh-my-pi/issues/5888))
 - Fixed authoritative providers (e.g. `openai-codex`) keeping unsupported bundled models selectable when a fresh model cache and an expired OAuth token coincided: built-in discovery now forces the OAuth refresh so the provider's model manager is constructed and prunes stale bundled entries (e.g. `gpt-5.4-nano`) instead of waiting out the cache TTL. ([#5364](https://github.com/can1357/oh-my-pi/issues/5364))
+### Added
+
+- Added `compaction.remoteStrategy` so native Responses streaming compaction models can use context-full maintenance while other models retain the configured fallback strategy.
+
 ### Fixed
 
 - Fixed cache-clean extension reloads unmounting every dynamic `xd://` device, including extension, MCP, and RPC host tools.
 - Retired extension tool closures after incompatible schema reloads so disposed state cannot keep handling calls; stale names now direct the model to the versioned replacement.
+- Kept retired extension tool names as serializable own properties so `/reload-extensions` cannot make the next Codex request fail with a missing tool name.
 
 ## [17.0.5] - 2026-07-18
 

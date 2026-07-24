@@ -2197,6 +2197,31 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"compaction.remoteStrategy": {
+		type: "enum",
+		values: ["inherit", "context-full"] as const,
+		default: "inherit",
+		ui: {
+			tab: "context",
+			group: "Compaction",
+			label: "Native Remote Strategy",
+			description:
+				"Use context-full maintenance when the active model supports native Responses streaming compaction, or inherit the configured strategy",
+			options: [
+				{
+					value: "inherit",
+					label: "Inherit",
+					description: "Use the configured compaction strategy for every model",
+				},
+				{
+					value: "context-full",
+					label: "Context-full",
+					description: "Prefer provider-native context-full maintenance when streaming compaction is supported",
+				},
+			],
+		},
+	},
+
 	"compaction.thresholdPercent": {
 		type: "number",
 		default: -1,
@@ -5658,6 +5683,7 @@ export type Personality = SettingValue<"personality">;
 export interface CompactionSettings {
 	enabled: boolean;
 	strategy: "context-full" | "handoff" | "shake" | "snapcompact" | "off";
+	remoteStrategy: "inherit" | "context-full";
 	thresholdPercent: number;
 	thresholdTokens: number;
 	reserveTokens: number | undefined;

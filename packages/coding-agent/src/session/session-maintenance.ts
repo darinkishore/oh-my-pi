@@ -36,6 +36,7 @@ import {
 	type ShakeRegion,
 	type SummaryOptions,
 	shouldCompact,
+	shouldUseCompactionV2Streaming,
 	shouldUseOpenAiRemoteCompaction,
 	shouldUseProviderNativeCompaction,
 } from "@oh-my-pi/pi-agent-core/compaction";
@@ -2130,6 +2131,28 @@ export class SessionMaintenance {
 	 *   inline execution so the handoff completes before the new turn begins.
 	 * @returns whether auto-compaction scheduled a follow-up turn.
 	 */
+	/**
+	 * Auto-compaction settings with the strategy promoted to `context-full`
+	 * when the active model can run streamed remote (V2) compaction — a
+	 * `handoff` local strategy must not shadow the provider-native path the
+	 * remote settings explicitly enable.
+	 */
+	#resolveAutoCompactionSettings() {
+		const settings = this.#host.settings.getGroup("compaction");
+		const model = this.#host.model();
+		if (
+			settings.strategy === "off" ||
+			settings.remoteStrategy !== "context-full" ||
+			!settings.remoteEnabled ||
+			!settings.remoteStreamingV2Enabled ||
+			!model ||
+			!shouldUseCompactionV2Streaming(model)
+		) {
+			return settings;
+		}
+		return { ...settings, strategy: "context-full" as const };
+	}
+
 	async runAutoCompaction(
 		reason: "overflow" | "threshold" | "idle" | "incomplete",
 		willRetry: boolean,
@@ -2144,7 +2167,7 @@ export class SessionMaintenance {
 			terminalTextAnswer?: boolean;
 		} = {},
 	): Promise<CompactionCheckResult> {
-		const compactionSettings = this.#host.settings.getGroup("compaction");
+		const compactionSettings = this.#resolveAutoCompactionSettings();
 		if (compactionSettings.strategy === "off") return COMPACTION_CHECK_NONE;
 		if (reason !== "idle" && !compactionSettings.enabled) return COMPACTION_CHECK_NONE;
 		const generation = this.#host.promptGeneration();
