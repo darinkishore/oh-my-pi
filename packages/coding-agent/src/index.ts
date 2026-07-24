@@ -22,6 +22,7 @@ export * from "./extensibility/custom-tools";
 export type * from "./extensibility/extensions";
 // Extension types and utilities
 export * from "./extensibility/extensions";
+export { getAllPluginExtensionPaths } from "./extensibility/plugins/loader";
 // Hook system types (legacy re-export)
 // Skills
 export * from "./extensibility/skills";
@@ -35,6 +36,7 @@ export * from "./modes";
 export * from "./modes/components";
 // Theme utilities for custom tools
 export * from "@oh-my-pi/pi-tui/theme";
+export { AgentRegistry } from "./registry/agent-registry";
 // SDK for programmatic usage
 export * from "./sdk";
 export * from "./session/agent-session";
