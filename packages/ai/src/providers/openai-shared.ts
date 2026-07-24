@@ -3498,3 +3498,54 @@ export function buildResponsesDeltaInput<TItem extends ResponseInputItem | Input
 	}
 	return current.input.slice(index) as TItem[];
 }
+
+/**
+ * Explain why {@link buildResponsesDeltaInput} returned null, without leaking
+ * item content: names the differing top-level option keys, or the first
+ * divergent item's combined index with both sides' `type` and key sets.
+ * Diagnostic only — call when a chain reset is about to be logged.
+ */
+export function describeResponsesDeltaMismatch(
+	previous: { input?: unknown[] } | undefined,
+	previousResponseItems: readonly unknown[] | undefined,
+	current: { input?: unknown[] },
+): string {
+	if (!previous) return "no previous request baseline";
+	if (!Array.isArray(previous.input) || !Array.isArray(current.input)) {
+		return "missing input arrays";
+	}
+	if (!deepEqualsWithout(previous, current, TOP_LEVEL_EXCLUDE_MAP)) {
+		const keys = new Set([...Object.keys(previous), ...Object.keys(current)]);
+		const diff: string[] = [];
+		for (const key of keys) {
+			if (key in TOP_LEVEL_EXCLUDE_MAP) continue;
+			const prevValue = (previous as Record<string, unknown>)[key];
+			const currValue = (current as Record<string, unknown>)[key];
+			if (prevValue !== currValue && !Bun.deepEquals(prevValue, currValue)) diff.push(key);
+		}
+		return `request options differ: [${diff.join(", ") || "?"}]`;
+	}
+	const baselineLen = previous.input.length + (previousResponseItems?.length ?? 0);
+	if (current.input.length <= baselineLen) {
+		return `history shrank or stalled: current input has ${current.input.length} items, baseline expects > ${baselineLen}`;
+	}
+	const describeItem = (item: unknown): string => {
+		if (!item || typeof item !== "object") return String(item);
+		const record = item as Record<string, unknown>;
+		return `type=${String(record.type ?? record.role ?? "?")} keys=[${Object.keys(record).sort().join(",")}]`;
+	};
+	let index = 0;
+	for (const [section, series] of [
+		["prev.input", previous.input],
+		["prevResponseItems", previousResponseItems ?? []],
+	] as const) {
+		for (const item of series) {
+			const currentItem = current.input[index];
+			if (!deepEqualsWithout(item, currentItem)) {
+				return `${section} diverges at combined index ${index}: expected ${describeItem(item)}, actual ${describeItem(currentItem)}`;
+			}
+			index++;
+		}
+	}
+	return "no divergence found (delta should have succeeded)";
+}

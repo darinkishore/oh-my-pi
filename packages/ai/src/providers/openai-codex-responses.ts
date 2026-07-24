@@ -102,6 +102,7 @@ import {
 	applyOpenAIServiceTier,
 	applyReasoningSummaryDone,
 	buildResponsesDeltaInput,
+	describeResponsesDeltaMismatch,
 	computerCallMetadata,
 	convertResponsesAssistantMessage,
 	convertResponsesInputContent,
@@ -3430,20 +3431,29 @@ function buildCodexChainedRequestBody(
 				hadTurnStateHeader: Boolean(state.turnState),
 				hadModelsEtagHeader: Boolean(state.modelsEtag),
 			});
-		resetCodexWebSocketAppendState(state);
-		state.turnState = undefined;
-		state.modelsEtag = undefined;
 		// A single reset is normal (compaction, steer, options change). A streak
 		// means chaining has silently stopped engaging — every call re-sends and
 		// re-bills full context (the exact failure mode of the 2026-07 crew cache
-		// collapse), so escalate to a visible warning.
-		state.appendResetStreak = (state.appendResetStreak ?? 0) + 1;
-		if (state.appendResetStreak === CODEX_APPEND_RESET_WARN_STREAK) {
+		// collapse), so escalate to a visible warning naming the divergence.
+		// Describe BEFORE the reset clears the baseline.
+		const streak = (state.appendResetStreak ?? 0) + 1;
+		if (streak === CODEX_APPEND_RESET_WARN_STREAK) {
 			logger.warn(
 				"Codex websocket turn chaining has failed to engage repeatedly; requests are re-sending full context every call (prompt cache likely cold past the instructions prefix)",
-				{ consecutiveResets: state.appendResetStreak },
+				{
+					consecutiveResets: streak,
+					mismatch: describeResponsesDeltaMismatch(
+						state.lastRequest,
+						state.lastResponseItems,
+						requestBody,
+					),
+				},
 			);
 		}
+		resetCodexWebSocketAppendState(state);
+		state.turnState = undefined;
+		state.modelsEtag = undefined;
+		state.appendResetStreak = streak;
 	}
 	return requestBody;
 }
