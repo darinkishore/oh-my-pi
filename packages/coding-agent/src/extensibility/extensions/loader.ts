@@ -1,7 +1,9 @@
 /**
  * Extension loader - loads TypeScript extension modules using native Bun import.
  */
+
 import type * as fs1 from "node:fs";
+import { realpathSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
@@ -671,8 +673,19 @@ export async function discoverExtensionPaths(
 
 	const addPath = (extPath: string): void => {
 		const resolved = path.resolve(extPath);
-		if (!seen.has(resolved)) {
-			seen.add(resolved);
+		// Dedupe by REAL path: an installed plugin that symlinks back into a
+		// project checkout (e.g. ~/.omp/plugins/node_modules/<name> -> the repo)
+		// otherwise loads the same extension file twice in that project's cwd —
+		// two live instances whose second boot tears down the first's runtime
+		// state ("Cannot use a closed database" on every turn).
+		let canonical = resolved;
+		try {
+			canonical = realpathSync(resolved);
+		} catch {
+			// Missing paths keep their resolved form; loadExtensions surfaces the error.
+		}
+		if (!seen.has(canonical)) {
+			seen.add(canonical);
 			allPaths.push(extPath);
 		}
 	};

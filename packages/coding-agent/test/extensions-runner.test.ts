@@ -137,7 +137,13 @@ describe("ExtensionRunner", () => {
 			fs.writeFileSync(path.join(extensionsDir, "shutdown-order.ts"), extCode);
 
 			const result = await loadTestExtensions();
-			const runner = new ExtensionRunner(result.extensions, result.runtime, tempDir.path(), sessionManager);
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
 			await runner.emit({ type: "session_shutdown" });
 			const order = (globalThis as { __shutdownOrderProbe?: string[] }).__shutdownOrderProbe;
 			expect(order).toEqual(["flush:start", "flush:end", "close:start"]);
