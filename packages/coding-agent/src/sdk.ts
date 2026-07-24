@@ -621,6 +621,8 @@ export interface CreateAgentSessionOptions {
 	providerPromptCacheKey?: string;
 	/** Whether `providerPromptCacheKey` is caller-pinned or inherited from a full fork. */
 	providerPromptCacheKeySource?: "explicit" | "fork";
+	/** Override the configured OpenAI Codex transport preference for this session. */
+	preferWebsockets?: boolean;
 	/** Absolute wall-clock deadline in Unix epoch milliseconds. */
 	deadline?: number;
 
@@ -4151,6 +4153,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		const initialTools = initialToolNames
 			.map(name => toolRegistry.get(name))
 			.filter((tool): tool is AgentTool => tool !== undefined);
+
 
 		// `model` is final here: deferred patterns, auth fallback, and extension
 		// role reclaim have all run, so a resolver can scope tiers to its family.
