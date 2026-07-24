@@ -1456,10 +1456,6 @@ export { CONFIG_DIR_NAME } from "@oh-my-pi/pi-utils";
 export { parseArgs } from "../cli/args";
 
 export * from "../index";
-export { formatBytes as formatSize } from "../tools/render-utils";
-export { copyToClipboard } from "../utils/clipboard";
-export { Type } from "./legacy-typebox";
-
 // ---------------------------------------------------------------------------
 // Package-root helpers that upstream Pi exports from `pi-coding-agent` but
 // OMP's index does not re-export. Legacy extensions (e.g.
@@ -1473,8 +1469,9 @@ export { getSettingsListTheme } from "../modes/theme/theme";
 export { convertToLlm } from "../session/messages";
 export { buildSessionContext } from "../session/session-context";
 export { formatBytes as formatSize } from "../tools/render-utils";
+export { copyToClipboard } from "../utils/clipboard";
 export { resizeImage } from "../utils/image-resize";
-export { Type } from "./typebox";
+export { Type } from "./legacy-typebox";
 
 /** Upstream Pi exports `getShellConfig` from the package root; OMP keeps it in pi-utils' procmgr. */
 export const getShellConfig = procmgr.getShellConfig;

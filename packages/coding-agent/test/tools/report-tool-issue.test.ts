@@ -435,11 +435,12 @@ describe("dispatchReportIssueDevice", () => {
 		const db = openTempDb();
 		const openSpy = vi.spyOn(reportIssue, "openAutoQaDb").mockReturnValue(db);
 		try {
-			const session = { settings: Settings.isolated({ "dev.autoqa": true }) } as ToolSession;
+			const session = { settings: consentedSettings() } as ToolSession;
 			const crewToolNames = ["agent", "send", "roster", "stop", "cron"];
 			for (const toolName of crewToolNames) {
 				await dispatchReportIssueDevice(session, `${toolName}: crew integration report`);
 			}
+			await settlePipeline();
 			const rows = db.prepare("SELECT tool FROM grievances ORDER BY id").all() as Array<{ tool: string }>;
 			expect(rows.map(row => row.tool)).toEqual(crewToolNames);
 		} finally {
