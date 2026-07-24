@@ -2696,7 +2696,10 @@ class CodexStreamProcessor {
 				);
 				if (responseId && replayableResponseItems && replayableResponseItems.length === nativeOutputItems.length) {
 					state.lastResponseId = responseId;
-					state.lastResponseItems = replayableResponseItems;
+					state.lastResponseItems = unrollCodexComputerItems(
+						replayableResponseItems,
+						this.model.compat.supportsImageDetailOriginal,
+					) as InputItem[];
 					state.canAppend = rawEvent.type === "response.done" || rawEvent.type === "response.completed" || steered;
 				} else {
 					// No response id, or replay sanitization dropped an item the server
