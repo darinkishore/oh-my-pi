@@ -119,6 +119,24 @@ function schemaDeclaresIntentField(schema: unknown): boolean {
 	return !!props && typeof props === "object" && "i" in props;
 }
 
+/**
+ * Name of the device's sole required string property, if the schema has that
+ * shape. Prose-friendly devices (`complain`: one required freeform string plus
+ * optional metadata) accept a plain-text write as that field instead of
+ * demanding a hand-built JSON object for a one-string payload.
+ */
+function soleRequiredStringField(schema: unknown): string | undefined {
+	if (!schema || typeof schema !== "object") return undefined;
+	const record = schema as {
+		required?: unknown;
+		properties?: Record<string, { type?: unknown } | undefined>;
+	};
+	if (!Array.isArray(record.required) || record.required.length !== 1) return undefined;
+	const field = record.required[0];
+	if (typeof field !== "string") return undefined;
+	return record.properties?.[field]?.type === "string" ? field : undefined;
+}
+
 function renderDocs(inst: Tool, heading = "#", descriptionCap?: number): string {
 	const schema = jsonSchemaToTypeScript(toolWireSchema(inst as AiTool));
 	let description = inst.description ?? "";
@@ -150,13 +168,24 @@ function parseDeviceArgs(
 	toolCallId: string,
 	docs: () => string,
 ): Record<string, unknown> {
+	const proseField = soleRequiredStringField(toolWireSchema(device));
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(content);
 	} catch (error) {
-		throw new ToolError(
-			`${XD_URL_PREFIX}${device.name} expects a JSON args object as content (${error instanceof Error ? error.message : String(error)}). Write \`?\` for docs.`,
-		);
+		// Plain-prose affordance: a single-required-string device takes the raw
+		// content as that field instead of failing the whole write over JSON.
+		if (proseField !== undefined && content.trim().length > 0) {
+			parsed = { [proseField]: content };
+		} else {
+			throw new ToolError(
+				`${XD_URL_PREFIX}${device.name} expects a JSON args object as content (${error instanceof Error ? error.message : String(error)}). Write \`?\` for docs.`,
+			);
+		}
+	}
+	if (typeof parsed === "string" && proseField !== undefined && parsed.trim().length > 0) {
+		// A bare JSON string (the model quoted its prose) gets the same wrap.
+		parsed = { [proseField]: parsed };
 	}
 	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
 		throw new ToolError(
