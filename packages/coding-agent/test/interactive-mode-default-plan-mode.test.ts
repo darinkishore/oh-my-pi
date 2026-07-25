@@ -357,6 +357,7 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 		const xdev: XdevState = {
 			tools: new Map(),
 			mountedNames: new Set(),
+			catalog: new Map(),
 			builtInNames: new Set(["read", "write"]),
 			isActive: name => session?.getActiveToolNames().includes(name) === true,
 		};
@@ -402,9 +403,10 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 		expect(created.planModeEnabled).toBe(false);
 		expect(session?.getPlanModeState()).toBeUndefined();
 		expect(session?.model?.id).toBe(previousModel?.id);
-		// The plan-only selections are removed while the live MCP tool survives
-		// top-level because restoring the read-only snapshot removes its device transport.
+		// The plan-only selection is removed while the live MCP tool survives
+		// top-level and `write` persists as the sticky device transport.
 		expect(session?.getActiveToolNames()).toContain(mountedTool.name);
+		expect(session?.getActiveToolNames()).toContain("write");
 		expect(session?.getActiveToolNames()).not.toContain(planSelectedTool.name);
 		expect(session?.getMountedXdevToolNames()).toEqual([]);
 		expect(xdev.tools.has(mountedTool.name)).toBe(true);
