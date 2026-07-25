@@ -825,6 +825,10 @@ export function createXdevState(
 	const state: XdevState = {
 		tools,
 		mountedNames,
+		catalog: new Map([...mountedNames].flatMap(name => {
+			const tool = tools.get(name);
+			return tool ? [[name, tool] as const] : [];
+		})),
 		builtInNames,
 		isActive: name => session.isToolActive?.(name) === true,
 		// Card rendering reads the same predicate as execution: mounted devices
