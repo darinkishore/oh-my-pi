@@ -291,6 +291,7 @@ it("top-level fallback preserves ACP permission for mounted destructive tools", 
 	const xdev: XdevState = {
 		tools,
 		mountedNames: new Set(),
+		catalog: new Map(),
 		builtInNames: new Set(["read", "write"]),
 		isActive: name => name === "read" || name === "write",
 	};
@@ -323,6 +324,7 @@ it("startup-mounted destructive tools gain the ACP permission gate when the brid
 	const xdev: XdevState = {
 		tools,
 		mountedNames: new Set(["delete"]),
+		catalog: new Map([["delete", deleteTool]]),
 		builtInNames: new Set(["read", "write"]),
 		isActive: name => name === "read" || name === "write",
 	};

@@ -6447,10 +6447,11 @@ export class AgentSession {
 				return false;
 			}
 
-			// Pending tool-roster and xd:// deltas accompany the next user-authored
-			// prompt, never an agent-initiated continuation. Reserve their pre-user
-			// position, but consume xd:// only after before_agent_start determines
-			// whether the final provider prompt still carries the base catalog.
+			// A pending xd:// delta rides the next prompt regardless of authorship;
+			// a tool-roster delta waits for the next user-authored prompt. Reserve
+			// their pre-message position, but consume xd:// only after
+			// before_agent_start determines whether the final provider prompt still
+			// carries the base catalog. Neither notice forces a turn of its own.
 			const xdevMountNoticeIndex = messages.length;
 			messages.push(message);
 			// Inject any pending "nextTurn" messages as context alongside the user message
@@ -6547,9 +6548,7 @@ export class AgentSession {
 					return false;
 				}
 			}
-			const xdevMountNotice = isUserQueuedMessage(message)
-				? this.#tools.takePendingXdevMountNotice(baseXdevCatalogDelivered)
-				: undefined;
+			const xdevMountNotice = this.#tools.takePendingXdevMountNotice(baseXdevCatalogDelivered);
 			const toolRosterNotice = isUserQueuedMessage(message) ? this.#tools.takePendingToolRosterNotice() : undefined;
 			if (xdevMountNotice || toolRosterNotice) {
 				messages.splice(

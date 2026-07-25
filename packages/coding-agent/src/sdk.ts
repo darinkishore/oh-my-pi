@@ -237,7 +237,9 @@ import {
 	WriteTool,
 	warmupLspServers,
 	xdevDocsAll,
+	xdevCatalogEntries,
 	xdevEntries,
+	setXdevMountedNames,
 } from "./tools";
 import { createBrowserPrelude } from "./tools/browser";
 import { isMCPToolName, normalizeToolNames } from "./tools/builtin-names";
@@ -3190,7 +3192,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			const defaultPrompt = await buildSystemPromptInternal({
 				cwd: promptCwd,
 				additionalWorkspaceRoots: sessionManager.getAdditionalDirectories(),
-				xdevTools: toolSession.xdev ? xdevEntries(toolSession.xdev) : [],
+				xdevTools: toolSession.xdev ? xdevCatalogEntries(toolSession.xdev) : [],
 				xdevDocs: toolSession.xdev
 					? xdevDocsAll(toolSession.xdev, settings.get("tools.xdevDocs"), settings.get("tools.xdevInlineDevices"))
 					: "",
@@ -3380,15 +3382,19 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					mountedNames.push(name);
 				else topLevelToolNames.push(name);
 			}
-			toolSession.xdev.mountedNames.clear();
-			for (const name of mountedNames) toolSession.xdev.mountedNames.add(name);
-			initialToolNames = topLevelToolNames;
-			const deviceTransportNeeded =
+			const transportNeeded =
 				mountedNames.length > 0 ||
 				initialToolNames.some(name => toolRegistry.get(name)?.deferrable === true) ||
-				toolSession.getPlanModeState?.()?.enabled === true;
-			if (deviceTransportNeeded && xdevWriteAvailable && !initialToolNames.includes("write")) {
-				initialToolNames.push("write");
+				toolSession.getPlanModeState?.()?.enabled === true ||
+				toolSession.xdev.catalog.size > 0;
+			const writeTransportAvailable =
+				!transportNeeded || (xdevWriteAvailable && (await ensureWriteRegistered()));
+			if (writeTransportAvailable) {
+				setXdevMountedNames(toolSession.xdev, mountedNames);
+				initialToolNames = topLevelToolNames;
+				if (transportNeeded && !initialToolNames.includes("write")) initialToolNames.push("write");
+			} else {
+				setXdevMountedNames(toolSession.xdev, []);
 			}
 		}
 

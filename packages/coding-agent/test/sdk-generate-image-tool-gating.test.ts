@@ -241,7 +241,12 @@ describe("generate_image tool gating", () => {
 		expect(mcpCalls).toBe(1);
 	});
 
-	it("keeps the device-only write across an empty MCP refresh", async () => {
+	// Deliberate inversion (deterministic tool surface): once a session has had
+	// a device, the write transport is part of its declared surface for the
+	// session's lifetime. Demoting it when the mount count hit zero flipped the
+	// wire tools array at the 0↔1 boundary and invalidated the provider prompt
+	// cache from position 0 on every MCP disconnect.
+	it("keeps transport-only write after the last MCP device disconnects", async () => {
 		const session = await sessionWithCustomTools(["read"], [customTool("mcp__test__search", true)]);
 		expect(session.getActiveToolNames()).toContain("write");
 		expect(session.getActiveToolNames()).not.toContain("mcp__test__search");
@@ -253,7 +258,7 @@ describe("generate_image tool gating", () => {
 		expect(session.getXdevToolEntries().map(entry => entry.name)).toContain("mcp__test__search");
 	});
 
-	it("keeps the device-only write during enabled-set round trips", async () => {
+	it("keeps transport-only write across enabled-set round trips", async () => {
 		const session = await sessionWithCustomTools(["read"], [customTool("mcp__test__search", true)]);
 		expect(session.getActiveToolNames()).toContain("write");
 

@@ -25,7 +25,14 @@ import { wrapToolWithMetaNotice } from "../tools/output-meta";
 import { isFilesystemSourcePath } from "../tools/path-utils";
 import { supportsExternalThinking } from "../tools/think";
 import { ToolAbortError, ToolError } from "../tools/tool-errors";
-import { isMountableUnderXdev, listXdevTools, type XdevState, xdevDocsFor, xdevEntries } from "../tools/xdev";
+import {
+	isMountableUnderXdev,
+	listXdevTools,
+	setXdevMountedNames,
+	type XdevState,
+	xdevDocsFor,
+	xdevEntries,
+} from "../tools/xdev";
 import { type EditMode, resolveEditMode } from "../utils/edit-mode";
 import {
 	extractPermissionLocations,
@@ -890,7 +897,11 @@ export class SessionTools {
 
 		const pinnedWrite = isPresentationPinned("write");
 		const activeDeferrableTool = tools.some(tool => tool.deferrable === true);
-		const transportNeeded = mountNames.size > 0 || activeDeferrableTool || this.#host.planModeEnabled();
+		const transportNeeded =
+			(this.#xdev?.catalog.size ?? 0) > 0 ||
+			mountNames.size > 0 ||
+			activeDeferrableTool ||
+			this.#host.planModeEnabled();
 		if (transportNeeded && !builtInWriteAvailable) {
 			const writeRegistration = this.#ensureWriteRegistered?.();
 			builtInWriteAvailable = writeRegistration ? (await untilAborted(signal, writeRegistration)) === true : false;
@@ -1064,10 +1075,8 @@ export class SessionTools {
 	}
 
 	#setMountedNames(names: Iterable<string>): void {
-		const mountedNames = this.#xdev?.mountedNames;
-		if (!mountedNames) return;
-		mountedNames.clear();
-		for (const name of names) mountedNames.add(name);
+		if (!this.#xdev) return;
+		setXdevMountedNames(this.#xdev, names);
 	}
 
 	#notifyToolRosterDelta(previousActiveToolNames: readonly string[], appliedNames: readonly string[]): void {
