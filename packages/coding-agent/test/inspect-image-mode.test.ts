@@ -124,6 +124,7 @@ describe("read tool follows actual tool availability", () => {
 						xdev: {
 							tools: new Map(),
 							mountedNames: new Set(options.xdevMounted ? ["inspect_image"] : []),
+							catalog: new Map(),
 							builtInNames: new Set(["inspect_image"]),
 							isActive: () => false,
 						},

@@ -221,6 +221,7 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 		const xdev: XdevState = {
 			tools: new Map(),
 			mountedNames: new Set(),
+			catalog: new Map(),
 			builtInNames: new Set(["read", "write"]),
 			isActive: name => session?.getActiveToolNames().includes(name) === true,
 		};
@@ -266,9 +267,10 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 		expect(created.planModeEnabled).toBe(false);
 		expect(session?.getPlanModeState()).toBeUndefined();
 		expect(session?.model?.id).toBe(previousModel?.id);
-		// Pre-existing successful-exit behavior (unchanged by this fix): restoring the
-		// pre-plan tool set drops the MCP device and plan-only selections entirely.
-		expect(session?.getActiveToolNames()).toEqual(["read"]);
+		// Restoring the pre-plan tool set drops the MCP device and plan-only
+		// selections; `write` persists because the session's sticky device
+		// catalog keeps the transport for its lifetime (deterministic surface).
+		expect(session?.getActiveToolNames()).toEqual(["read", "write"]);
 		expect(session?.getMountedXdevToolNames()).toEqual([]);
 		expect(xdev.tools.has(mountedTool.name)).toBe(true);
 		expect(resolveXdevTool(xdev, mountedTool.name)).toBeUndefined();

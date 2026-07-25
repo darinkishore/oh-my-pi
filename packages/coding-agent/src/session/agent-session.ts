@@ -5387,10 +5387,10 @@ export class AgentSession {
 				return;
 			}
 
-			// A pending xd:// delta accompanies the next user-authored prompt,
-			// never an agent-initiated continuation. Reserve its pre-user position,
-			// but consume it only after before_agent_start determines whether the
-			// final provider prompt still carries the base xd:// catalog.
+			// A pending xd:// delta rides the next prompt regardless of authorship.
+			// Reserve its pre-message position, but consume it only after
+			// before_agent_start determines whether the final provider prompt still
+			// carries the base catalog. The notice never forces a turn of its own.
 			const xdevMountNoticeIndex = messages.length;
 			messages.push(message);
 			// Inject any pending "nextTurn" messages as context alongside the user message
@@ -5483,9 +5483,7 @@ export class AgentSession {
 					return;
 				}
 			}
-			const xdevMountNotice = isUserQueuedMessage(message)
-				? this.#tools.takePendingXdevMountNotice(baseXdevCatalogDelivered)
-				: undefined;
+			const xdevMountNotice = this.#tools.takePendingXdevMountNotice(baseXdevCatalogDelivered);
 			if (xdevMountNotice) {
 				messages.splice(xdevMountNoticeIndex, 0, xdevMountNotice);
 			}

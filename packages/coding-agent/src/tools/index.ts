@@ -694,6 +694,12 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 		session.xdev = {
 			tools: toolRegistry,
 			mountedNames,
+			catalog: new Map(
+				[...mountedNames].flatMap(name => {
+					const tool = toolRegistry.get(name);
+					return tool ? [[name, tool] as const] : [];
+				}),
+			),
 			builtInNames,
 			isActive: name => session.isToolActive?.(name) === true,
 		};

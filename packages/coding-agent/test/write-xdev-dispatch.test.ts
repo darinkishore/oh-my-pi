@@ -14,6 +14,7 @@ import { WriteTool, writeToolRenderer } from "@oh-my-pi/pi-coding-agent/tools/wr
 import {
 	listXdevTools,
 	resolveMountedXdevTool,
+	setXdevMountedNames,
 	XDEV_DOCS_PER_DEVICE_CAP,
 	XDEV_DOCS_TOTAL_BUDGET,
 	XDEV_EXTERNAL_DESCRIPTION_CAP,
@@ -42,9 +43,11 @@ function xdevSession(cwd: string, overrides: Partial<ToolSession> = {}): ToolSes
 }
 
 function createTestXdevState(tools: Tool[], builtInNames: Iterable<string> = tools.map(tool => tool.name)): XdevState {
+	const toolMap = new Map(tools.map(tool => [tool.name, tool]));
 	return {
-		tools: new Map(tools.map(tool => [tool.name, tool])),
+		tools: toolMap,
 		mountedNames: new Set(tools.map(tool => tool.name)),
+		catalog: new Map(toolMap),
 		builtInNames: new Set(builtInNames),
 		isActive: () => false,
 	};
@@ -426,7 +429,7 @@ describe("read and write route xd:// device URLs", () => {
 			Object.defineProperty(giant, "name", { value: "giant_mcp_tool" });
 			Object.defineProperty(giant, "description", { value: "x".repeat(XDEV_DOCS_PER_DEVICE_CAP + 1) });
 			xdev.tools.set(giant.name, giant);
-			xdev.mountedNames.add(giant.name);
+			setXdevMountedNames(xdev, [...xdev.mountedNames, giant.name]);
 			xdev.builtInNames.add(giant.name);
 
 			const docs = xdevDocsAll(xdev);
@@ -459,7 +462,7 @@ describe("read and write route xd:// device URLs", () => {
 				value: `SUMMARY ${"z".repeat(XDEV_EXTERNAL_DESCRIPTION_CAP * 3)} TAIL`,
 			});
 			xdev.tools.set(external.name, external);
-			xdev.mountedNames.add(external.name);
+			setXdevMountedNames(xdev, [...xdev.mountedNames, external.name]);
 
 			const inlineDocs = xdevDocsAll(xdev, "inline");
 			expect(inlineDocs).toContain("## mcp_external_tool");
@@ -484,8 +487,7 @@ describe("read and write route xd:// device URLs", () => {
 			Object.defineProperty(unrelatedMcp, "name", { value: "mcp__other_server_execute" });
 			xdev.tools.set(contextMode.name, contextMode);
 			xdev.tools.set(unrelatedMcp.name, unrelatedMcp);
-			xdev.mountedNames.clear();
-			for (const name of [...builtInMountedNames, contextMode.name, unrelatedMcp.name]) xdev.mountedNames.add(name);
+			setXdevMountedNames(xdev, [...builtInMountedNames, contextMode.name, unrelatedMcp.name]);
 
 			const allowlistedDocs = xdevDocsAll(xdev, "builtins", ["mcp__context_mode_*"]);
 			expect(allowlistedDocs).toContain("## mcp__context_mode_ctx_execute");

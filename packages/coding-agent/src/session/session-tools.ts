@@ -21,7 +21,14 @@ import { isMCPToolName, normalizeToolNames } from "../tools/builtin-names";
 import { computerExposureMode } from "../tools/computer/exposure";
 import { wrapToolWithMetaNotice } from "../tools/output-meta";
 import { ToolAbortError, ToolError } from "../tools/tool-errors";
-import { isMountableUnderXdev, listXdevTools, type XdevState, xdevDocsFor, xdevEntries } from "../tools/xdev";
+import {
+	isMountableUnderXdev,
+	listXdevTools,
+	setXdevMountedNames,
+	type XdevState,
+	xdevDocsFor,
+	xdevEntries,
+} from "../tools/xdev";
 import { type EditMode, resolveEditMode } from "../utils/edit-mode";
 import { type InspectImageMode, isInspectImageToolActive } from "../utils/inspect-image-mode";
 import { formatLocalCalendarDate } from "../utils/local-date";
@@ -667,7 +674,11 @@ export class SessionTools {
 
 		const pinnedWrite = isPresentationPinned("write");
 		const activeDeferrableTool = tools.some(tool => tool.deferrable === true);
-		const transportNeeded = mountNames.size > 0 || activeDeferrableTool || this.#host.planModeEnabled();
+		const transportNeeded =
+			(this.#xdev?.catalog.size ?? 0) > 0 ||
+			mountNames.size > 0 ||
+			activeDeferrableTool ||
+			this.#host.planModeEnabled();
 		if (transportNeeded && !builtInWriteAvailable) {
 			builtInWriteAvailable = (await this.#ensureWriteRegistered?.()) === true;
 			if (builtInWriteAvailable) this.#builtInToolNames.add("write");
@@ -732,10 +743,8 @@ export class SessionTools {
 	}
 
 	#setMountedNames(names: Iterable<string>): void {
-		const mountedNames = this.#xdev?.mountedNames;
-		if (!mountedNames) return;
-		mountedNames.clear();
-		for (const name of names) mountedNames.add(name);
+		if (!this.#xdev) return;
+		setXdevMountedNames(this.#xdev, names);
 	}
 
 	/**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { XdevRegistry } from "@oh-my-pi/pi-coding-agent/tools/xdev";
+import { dispatchXdevTool, type XdevState } from "@oh-my-pi/pi-coding-agent/tools/xdev";
 import { type } from "arktype";
 
 // Prose affordance: a device whose schema has exactly one REQUIRED string
@@ -37,25 +37,34 @@ function makeStrictTool() {
 	return tool;
 }
 
+function mount(tool: ReturnType<typeof makeProseTool> | ReturnType<typeof makeStrictTool>): XdevState {
+	const tools = new Map([[tool.name, tool as never]]);
+	return {
+		tools,
+		mountedNames: new Set([tool.name]),
+		catalog: new Map(tools),
+		builtInNames: new Set([tool.name]),
+		isActive: () => false,
+	};
+}
+
 describe("xd:// prose-shaped devices", () => {
 	it("routes a plain-text write into the sole required string field", async () => {
 		const prose = makeProseTool();
-		const registry = new XdevRegistry([prose as never]);
-		await registry.dispatch("grumble", "cron ids collide across owners", "call-1");
+		await dispatchXdevTool(mount(prose), "grumble", "cron ids collide across owners", "call-1");
 		expect(prose.calls).toEqual([{ complaint: "cron ids collide across owners" }]);
 	});
 
 	it("wraps a bare JSON string write the same way", async () => {
 		const prose = makeProseTool();
-		const registry = new XdevRegistry([prose as never]);
-		await registry.dispatch("grumble", JSON.stringify("quoted prose"), "call-2");
+		await dispatchXdevTool(mount(prose), "grumble", JSON.stringify("quoted prose"), "call-2");
 		expect(prose.calls).toEqual([{ complaint: "quoted prose" }]);
 	});
 
 	it("still parses real JSON objects with optional fields", async () => {
 		const prose = makeProseTool();
-		const registry = new XdevRegistry([prose as never]);
-		await registry.dispatch(
+		await dispatchXdevTool(
+			mount(prose),
 			"grumble",
 			JSON.stringify({ complaint: "body", severity: "papercut" }),
 			"call-3",
@@ -65,8 +74,7 @@ describe("xd:// prose-shaped devices", () => {
 
 	it("keeps rejecting prose for devices with more than one required field", async () => {
 		const strict = makeStrictTool();
-		const registry = new XdevRegistry([strict as never]);
-		const { result } = await registry.dispatch("strict", "not json", "call-4");
+		const { result } = await dispatchXdevTool(mount(strict), "strict", "not json", "call-4");
 		const text = result.content.find(entry => entry.type === "text")?.text ?? "";
 		expect(text).toContain("expects a JSON args object");
 		expect(strict.calls).toEqual([]);
