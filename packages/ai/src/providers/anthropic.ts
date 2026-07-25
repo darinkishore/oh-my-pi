@@ -3414,6 +3414,130 @@ function extractClaudeCodeFirstUserMessageText(messages: readonly Message[]): st
 	return "";
 }
 
+// OMP_PREFIX_AUDIT=1 — per-call prompt-prefix stability audit.
+//
+// The Anthropic prompt cache hashes tools → system → messages in that order,
+// so any byte change in tools or system invalidates everything after it, and
+// the artifacts on disk (session JSONL, logs) cannot say which segment moved
+// when a warm session suddenly bills a full cache write. This opt-in audit
+// hashes each segment per call (cache_control stripped, so breakpoint drift
+// never counts as a change) and warns with the smallest diff that names the
+// culprit: tool names added/removed/changed, the first divergent character of
+// the system prompt with a short excerpt, or the first divergent message
+// index. Excerpts quote the session's own prompt into the local log — that is
+// the point of the flag; leave it off outside diagnosis.
+const PREFIX_AUDIT_ENABLED = process.env.OMP_PREFIX_AUDIT === "1";
+const PREFIX_AUDIT_SEED = 0x9e37_79b9n;
+const PREFIX_AUDIT_EXCERPT_CHARS = 160;
+
+type PrefixAuditSnapshot = {
+	toolInfo: Map<string, { hash: string; chars: number }>;
+	systemHash: string;
+	systemText: string;
+	messageHashes: string[];
+};
+
+const prefixAuditSnapshots = new Map<string, PrefixAuditSnapshot>();
+
+function prefixAuditStringify(value: unknown): string {
+	return JSON.stringify(value, (key, entry) => (key === "cache_control" ? undefined : entry)) ?? "null";
+}
+
+function prefixAuditHash(serialized: string): string {
+	return Bun.hash.xxHash64(serialized, PREFIX_AUDIT_SEED).toString(16);
+}
+
+function prefixAuditSystemText(system: MessageCreateParamsStreaming["system"]): string {
+	if (system === undefined) return "";
+	if (typeof system === "string") return system;
+	return system.map(block => block.text ?? prefixAuditStringify(block)).join("\n \n");
+}
+
+function auditAnthropicPrefixStability(sessionKey: string, params: MessageCreateParamsStreaming): void {
+	const toolInfo = new Map<string, { hash: string; chars: number }>();
+	for (const tool of params.tools ?? []) {
+		const serialized = prefixAuditStringify(tool);
+		const name = "name" in tool && typeof tool.name === "string" ? tool.name : `#${toolInfo.size}`;
+		toolInfo.set(name, { hash: prefixAuditHash(serialized), chars: serialized.length });
+	}
+	const systemText = prefixAuditSystemText(params.system);
+	const systemHash = prefixAuditHash(systemText);
+	const messageHashes = params.messages.map(message => prefixAuditHash(prefixAuditStringify(message)));
+
+	const prev = prefixAuditSnapshots.get(sessionKey);
+	prefixAuditSnapshots.set(sessionKey, { toolInfo, systemHash, systemText, messageHashes });
+
+	logger.info("prefix-audit snapshot", {
+		sessionKey,
+		tools: toolInfo.size,
+		toolsHash: prefixAuditHash([...toolInfo.entries()].map(([name, info]) => `${name}:${info.hash}`).join(",")),
+		systemHash,
+		systemChars: systemText.length,
+		messages: messageHashes.length,
+	});
+	if (!prev) return;
+
+	const added = [...toolInfo.keys()].filter(name => !prev.toolInfo.has(name));
+	const removed = [...prev.toolInfo.keys()].filter(name => !toolInfo.has(name));
+	const changed = [...toolInfo.entries()]
+		.filter(([name, info]) => {
+			const before = prev.toolInfo.get(name);
+			return before !== undefined && before.hash !== info.hash;
+		})
+		.map(([name, info]) => ({ name, prevChars: prev.toolInfo.get(name)?.chars, chars: info.chars }));
+	const reordered =
+		!added.length && !removed.length && [...toolInfo.keys()].join(",") !== [...prev.toolInfo.keys()].join(",");
+	if (added.length || removed.length || changed.length || reordered) {
+		logger.warn("prefix-audit: tools array changed — cache prefix invalidated from position 0", {
+			sessionKey,
+			added,
+			removed,
+			changed,
+			reordered,
+		});
+	}
+
+	if (prev.systemHash !== systemHash) {
+		let divergesAtChar = 0;
+		const sharedChars = Math.min(prev.systemText.length, systemText.length);
+		while (divergesAtChar < sharedChars && prev.systemText[divergesAtChar] === systemText[divergesAtChar]) {
+			divergesAtChar++;
+		}
+		logger.warn("prefix-audit: system prompt changed — cache prefix invalidated from the system segment", {
+			sessionKey,
+			prevChars: prev.systemText.length,
+			chars: systemText.length,
+			divergesAtChar,
+			prevExcerpt: prev.systemText.slice(divergesAtChar, divergesAtChar + PREFIX_AUDIT_EXCERPT_CHARS),
+			excerpt: systemText.slice(divergesAtChar, divergesAtChar + PREFIX_AUDIT_EXCERPT_CHARS),
+		});
+	}
+
+	const sharedMessages = Math.min(prev.messageHashes.length, messageHashes.length);
+	let divergesAt = -1;
+	for (let i = 0; i < sharedMessages; i++) {
+		if (prev.messageHashes[i] !== messageHashes[i]) {
+			divergesAt = i;
+			break;
+		}
+	}
+	if (divergesAt !== -1) {
+		logger.warn("prefix-audit: messages diverge inside previously-sent history", {
+			sessionKey,
+			divergesAt,
+			role: params.messages[divergesAt]?.role,
+			prevMessages: prev.messageHashes.length,
+			messages: messageHashes.length,
+		});
+	} else if (messageHashes.length < prev.messageHashes.length) {
+		logger.warn("prefix-audit: message history shrank (compaction or trim)", {
+			sessionKey,
+			prevMessages: prev.messageHashes.length,
+			messages: messageHashes.length,
+		});
+	}
+}
+
 type AnthropicParamBuildOptions = {
 	disableStrictTools: boolean;
 	useUmansGatewayWebSearch: boolean;
@@ -3649,6 +3773,10 @@ function buildParams(
 	applyPromptCaching(params, cacheControl);
 	enforceCacheControlLimit(params, 4);
 	normalizeCacheControlTtlOrdering(params);
+
+	if (PREFIX_AUDIT_ENABLED) {
+		auditAnthropicPrefixStability(`${options?.sessionId ?? "anon"}:${params.model}`, params);
+	}
 
 	return params;
 }
