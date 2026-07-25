@@ -276,6 +276,12 @@ export interface XdevState {
 	readonly tools: Map<string, Tool>;
 	/** Ordered names currently presented as mounted devices. */
 	readonly mountedNames: Set<string>;
+	/**
+	 * Every device mounted during this session, in first-seen order. Entries are
+	 * updated on remount but never removed so prompt bytes stay stable across
+	 * transient unmounts and reconnects.
+	 */
+	readonly catalog: Map<string, Tool>;
 	/** Names originating from built-in factories, used only for prompt presentation. */
 	readonly builtInNames: Set<string>;
 	/** Whether a name is active at the top level. */
@@ -315,19 +321,41 @@ export function listXdevTools(state: XdevState): Tool[] {
 	});
 }
 
+/** Sticky prompt-catalog tools in first-seen order. */
+export function listXdevCatalogTools(state: XdevState): Tool[] {
+	return [...state.catalog.values()];
+}
+
+/** Replace the live mount set and remember every mounted device. */
+export function setXdevMountedNames(state: XdevState, names: Iterable<string>): void {
+	const next = [...names];
+	for (const name of next) {
+		const tool = state.tools.get(name);
+		if (tool) state.catalog.set(name, tool);
+	}
+	state.mountedNames.clear();
+	for (const name of next) state.mountedNames.add(name);
+}
+
 /** `{name, summary, dynamic}` triples for prompt templates and `/tools` display. */
 export function xdevEntries(state: XdevState): Array<{ name: string; summary: string; dynamic: boolean }> {
-	return listXdevTools(state).map(tool => {
-		// Built-ins are first-party; anything else carries third-party metadata. One
-		// boolean drives both the description cap and the flag callers present, so
-		// the two can never disagree about which summaries are untrusted.
-		const dynamic = !state.builtInNames.has(tool.name);
-		return {
-			name: tool.name,
-			summary: promptCatalogSummary(tool, dynamic ? XDEV_EXTERNAL_DESCRIPTION_CAP : undefined),
-			dynamic,
-		};
-	});
+	return listXdevTools(state).map(tool => xdevEntry(state, tool));
+}
+
+/** Sticky prompt entries used only by the system prompt. */
+export function xdevCatalogEntries(
+	state: XdevState,
+): Array<{ name: string; summary: string; dynamic: boolean }> {
+	return listXdevCatalogTools(state).map(tool => xdevEntry(state, tool));
+}
+
+function xdevEntry(state: XdevState, tool: Tool): { name: string; summary: string; dynamic: boolean } {
+	const dynamic = !state.builtInNames.has(tool.name);
+	return {
+		name: tool.name,
+		summary: promptCatalogSummary(tool, dynamic ? XDEV_EXTERNAL_DESCRIPTION_CAP : undefined),
+		dynamic,
+	};
 }
 
 /** `read xd://` listing with one device per line. */
@@ -356,7 +384,9 @@ export function xdevDocsAll(
 	const overflow: Tool[] = [];
 	const inlineGlobs = compileInlineGlobs(inlinePatterns);
 	let used = 0;
-	for (const tool of listXdevTools(state)) {
+	// Prompt docs use the sticky catalog: transient unmount timing must not
+	// change the cached system-prompt prefix. Dispatch remains live-set based.
+	for (const tool of listXdevCatalogTools(state)) {
 		if (!shouldInlineXdevTool(state, tool, mode, inlineGlobs)) {
 			overflow.push(tool);
 			continue;
@@ -423,6 +453,11 @@ function shouldInlineXdevTool(
 function resolveRequiredXdevTool(state: XdevState, name: string): Tool {
 	const inst = resolveXdevTool(state, name);
 	if (!inst) {
+		if (state.catalog.has(name)) {
+			throw new ToolError(
+				`Tool device ${XD_URL_PREFIX}${name} is not currently mounted (its provider is inactive or reconnecting). Currently mounted: ${[...state.mountedNames].join(", ")}.`,
+			);
+		}
 		throw new ToolError(
 			`No such tool: ${XD_URL_PREFIX}${name}. Mounted devices: ${[...state.mountedNames].join(", ")}. Active top-level tools are also dispatchable via ${XD_URL_PREFIX}<tool>.`,
 		);
