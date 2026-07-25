@@ -82,6 +82,7 @@ function createTestXdevState(): XdevState {
 	return {
 		tools: new Map(),
 		mountedNames: new Set(),
+		catalog: new Map(),
 		builtInNames: new Set(["read", "write"]),
 		isActive: () => true,
 	};

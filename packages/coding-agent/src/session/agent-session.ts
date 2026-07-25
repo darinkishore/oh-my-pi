@@ -7032,12 +7032,11 @@ export class AgentSession {
 				return false;
 			}
 
-			// Pending tool-roster and xd:// deltas accompany the next user-authored
-			// prompt, never an agent-initiated continuation. Reserve their pre-user
-			// position now. Non-consuming previews count toward pre-prompt context
-			// maintenance, while the live deltas are consumed only after maintenance:
-			// promotion/summary can rebuild the base prompt and clear a roster delta
-			// it subsumes, avoiding a contradictory materialized notice.
+			// A pending xd:// delta rides the next prompt regardless of authorship;
+			// a tool-roster delta waits for the next user-authored prompt. Reserve
+			// their pre-message position now. Non-consuming previews count toward
+			// pre-prompt maintenance; consume live deltas only after maintenance,
+			// which can rebuild the base prompt and supersede a pending delta.
 			const xdevMountNoticeIndex = messages.length;
 			messages.push(message);
 			// Inject any pending "nextTurn" messages as context alongside the user message
@@ -7086,9 +7085,9 @@ export class AgentSession {
 			// rebuild may supersede. The tool-roster notice is a tiny name list with
 			// no budget impact, so it is not previewed here — it must always ship
 			// alongside the schema change it describes (see below).
-			const previewXdevMountNotice = isUserQueuedMessage(message)
-				? this.#tools.peekPendingXdevMountNotice({ baseCatalogDelivered: baseXdevCatalogDelivered })
-				: undefined;
+			const previewXdevMountNotice = this.#tools.peekPendingXdevMountNotice({
+				baseCatalogDelivered: baseXdevCatalogDelivered,
+			});
 			const maintenanceMessages = previewXdevMountNotice?.notice ? [...messages] : messages;
 			if (maintenanceMessages !== messages && previewXdevMountNotice?.notice) {
 				maintenanceMessages.splice(xdevMountNoticeIndex, 0, previewXdevMountNotice.notice);
