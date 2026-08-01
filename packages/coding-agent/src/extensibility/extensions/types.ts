@@ -533,6 +533,8 @@ export interface ExtensionContext {
 	 * Optional for compatibility with hosts that do not provide side turns.
 	 */
 	runEphemeralTurn?(options: EphemeralTurnOptions): Promise<EphemeralTurnResult>;
+	/** Execute a cell through this session's persistent eval runtime. */
+	runEval(params: ExtensionEvalParams, options?: ExtensionEvalOptions): Promise<AgentToolResult>;
 	/** Structured memory runtime for status/search/save across the configured backend. */
 	memory?: MemoryRuntimeContext;
 	/**
@@ -600,6 +602,33 @@ export interface ExtensionContext {
 	/** Replace this session's live extension graph without restarting it. */
 	reloadExtensions(options?: ExtensionsReloadOptions): Promise<ExtensionsReloadReport>;
 }
+
+export interface ExtensionEvalParams {
+	language: "py" | "js" | "rb" | "jl";
+	code: string;
+	title?: string;
+	timeout?: number;
+	reset?: boolean;
+}
+
+export interface ExtensionEvalTool {
+	name: string;
+	execute(toolCallId: string, args: unknown, signal?: AbortSignal): Promise<AgentToolResult>;
+}
+
+export interface ExtensionEvalOptions {
+	/** Override the persistent kernel key without replacing the owning ToolSession. */
+	sessionId?: string;
+	/** Restrict and adapt tools callable from the cell. Undefined uses the session registry. */
+	resolveTool?: (name: string) => ExtensionEvalTool | undefined;
+	signal?: AbortSignal;
+	onUpdate?: AgentToolUpdateCallback;
+}
+
+export type ExtensionEvalHandler = (
+	params: ExtensionEvalParams,
+	options?: ExtensionEvalOptions,
+) => Promise<AgentToolResult>;
 
 export interface ExtensionsReloadOptions {
 	/**

@@ -65,6 +65,7 @@ import type {
 	ExtensionContext,
 	ExtensionContextActions,
 	ExtensionError,
+	ExtensionEvalHandler,
 	ExtensionEvent,
 	ExtensionFlag,
 	ExtensionMode,
@@ -716,6 +717,7 @@ export class ExtensionRunner {
 		getAsyncJobSnapshot?: () => AsyncJobSnapshot | null,
 		/** Identity of the agent this runner's session runs; defaults to the top-level agent. */
 		private readonly agent: ExtensionAgentIdentity = TOP_LEVEL_AGENT,
+		private readonly runEval?: ExtensionEvalHandler,
 	) {
 		this.#uiContext = noOpUIContext;
 		this.#getMemoryFn = getMemory;
@@ -1452,6 +1454,10 @@ export class ExtensionRunner {
 						return await this.#ephemeralTurnBlocker.run("ephemeral turn", () => runEphemeralTurn(request));
 					}
 				: undefined,
+			runEval: async (params, options) => {
+				if (!this.runEval) throw new Error("Session eval is unavailable in this extension context");
+				return await this.runEval(params, options);
+			},
 			localProtocolOptions: this.localProtocolOptions,
 			memory: this.#getMemoryFn?.(),
 			setInterval: (callback, ms, ...args) => this.#managedTimers.setInterval(callback, ms, ...args),
