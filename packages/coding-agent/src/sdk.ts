@@ -202,15 +202,15 @@ import {
 	ReadTool,
 	releaseComputerSessionsForOwner,
 	resolveMountedXdevExecutable,
+	setXdevMountedNames,
 	type Tool,
 	type ToolSession,
 	WebSearchTool,
 	WriteTool,
 	warmupLspServers,
-	xdevDocsAll,
 	xdevCatalogEntries,
+	xdevDocsAll,
 	xdevEntries,
-	setXdevMountedNames,
 } from "./tools";
 import { isMCPToolName, normalizeToolNames } from "./tools/builtin-names";
 import { ToolContextStore } from "./tools/context";
@@ -2573,6 +2573,22 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			settings,
 			localProtocolOptions,
 			() => (hasSession ? session.getAsyncJobSnapshot() : null),
+			async (params, evalOptions = {}) => {
+				const evalSession = Object.create(toolSession) as ToolSession;
+				if (evalOptions.sessionId !== undefined) {
+					evalSession.getEvalSessionId = () => evalOptions.sessionId ?? null;
+				}
+				if (evalOptions.resolveTool) {
+					evalSession.getToolByName = name => evalOptions.resolveTool?.(name) as AgentTool | undefined;
+				}
+				const evalTool = new EvalTool(evalSession);
+				return await evalTool.execute(
+					`extension-eval-${crypto.randomUUID()}`,
+					params,
+					evalOptions.signal,
+					evalOptions.onUpdate,
+				);
+			},
 		);
 
 		credentialDisabledTarget = extensionRunner;

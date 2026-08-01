@@ -39,6 +39,7 @@ import type {
 	ExtensionContext,
 	ExtensionContextActions,
 	ExtensionError,
+	ExtensionEvalHandler,
 	ExtensionEvent,
 	ExtensionFlag,
 	ExtensionRuntime,
@@ -489,6 +490,7 @@ export class ExtensionRunner {
 		private readonly settings?: Settings,
 		private readonly localProtocolOptions?: LocalProtocolOptions,
 		getAsyncJobSnapshot?: () => AsyncJobSnapshot | null,
+		private readonly runEval?: ExtensionEvalHandler,
 	) {
 		this.#uiContext = noOpUIContext;
 		this.#getMemoryFn = getMemory;
@@ -912,6 +914,10 @@ export class ExtensionRunner {
 			hasPendingMessages: () => this.#hasPendingMessagesFn(),
 			shutdown: () => this.#shutdownHandler(),
 			getSystemPrompt: () => this.#getSystemPromptFn(),
+			runEval: async (params, options) => {
+				if (!this.runEval) throw new Error("Session eval is unavailable in this extension context");
+				return await this.runEval(params, options);
+			},
 			localProtocolOptions: this.localProtocolOptions,
 			memory: this.#getMemoryFn?.(),
 			setInterval: (callback, ms, ...args) => this.#managedTimers.setInterval(callback, ms, ...args),
