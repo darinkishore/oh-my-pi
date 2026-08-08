@@ -378,19 +378,14 @@ describe("openai-codex Responses Lite input shaping", () => {
 		});
 	});
 
-	it("resolves Lite from explicit options, the environment, then the model default", async () => {
+	it("defaults to standard Responses while preserving explicit Lite overrides", async () => {
 		const previous = Bun.env.PI_CODEX_RESPONSES_LITE;
 		const model = createCodexModel("gpt-5.6-terra", { useResponsesLite: true });
 		try {
 			delete Bun.env.PI_CODEX_RESPONSES_LITE;
-			const modelDefault = await transformRequestBody({ model: model.id, instructions: "sys" }, model, {});
-			expect(modelDefault.instructions).toBeUndefined();
-			expect(modelDefault.input?.[0]?.type).toBe("additional_tools");
-
-			Bun.env.PI_CODEX_RESPONSES_LITE = "false";
-			const envOptOut = await transformRequestBody({ model: model.id, instructions: "sys" }, model, {});
-			expect(envOptOut.instructions).toBe("sys");
-			expect(envOptOut.input?.some(item => item.type === "additional_tools")).toBe(false);
+			const standardDefault = await transformRequestBody({ model: model.id, instructions: "sys" }, model, {});
+			expect(standardDefault.instructions).toBe("sys");
+			expect(standardDefault.input?.some(item => item.type === "additional_tools")).toBe(false);
 
 			Bun.env.PI_CODEX_RESPONSES_LITE = "true";
 			const explicitOptOut = await transformRequestBody({ model: model.id, instructions: "sys" }, model, {
@@ -398,6 +393,17 @@ describe("openai-codex Responses Lite input shaping", () => {
 			});
 			expect(explicitOptOut.instructions).toBe("sys");
 			expect(explicitOptOut.input?.some(item => item.type === "additional_tools")).toBe(false);
+
+			const envOptIn = await transformRequestBody({ model: model.id, instructions: "sys" }, model, {});
+			expect(envOptIn.instructions).toBeUndefined();
+			expect(envOptIn.input?.[0]?.type).toBe("additional_tools");
+
+			Bun.env.PI_CODEX_RESPONSES_LITE = "false";
+			const explicitOptIn = await transformRequestBody({ model: model.id, instructions: "sys" }, model, {
+				responsesLite: true,
+			});
+			expect(explicitOptIn.instructions).toBeUndefined();
+			expect(explicitOptIn.input?.[0]?.type).toBe("additional_tools");
 		} finally {
 			if (previous === undefined) delete Bun.env.PI_CODEX_RESPONSES_LITE;
 			else Bun.env.PI_CODEX_RESPONSES_LITE = previous;
@@ -670,8 +676,31 @@ describe("openai-codex Responses Lite and client metadata wire format", () => {
 		]);
 	});
 
-	it("sends required lite context for opaque model codenames", async () => {
+	it("sends required lite context for opaque model codenames when explicitly enabled", async () => {
 		const model = createCodexModel("gpt-daybreak-blue-latest", { useResponsesLite: true });
+		let captured: CapturedCodexRequest | undefined;
+		const fetchMock = createCodexFetchMock(createCodexSse(COMPLETED_CODEX_EVENTS), request => {
+			captured = request;
+		});
+
+		const result = await streamOpenAICodexResponses(model, createCodexTestContext(), {
+			apiKey: createCodexTestToken(),
+			fetch: fetchMock,
+			responsesLite: true,
+		}).result();
+
+		expect(result.stopReason).toBe("stop");
+		expect(captured!.headers.get("x-openai-internal-codex-responses-lite")).toBe("true");
+		expect(captured!.headers.get("version")).toBe("0.144.1");
+		const body = captured!.body;
+		expect(body.reasoning).toEqual({ context: "all_turns" });
+		expect(body.instructions).toBeUndefined();
+		expect(body.tools).toBeUndefined();
+		expect((body.input as Array<Record<string, unknown>>)[0]?.type).toBe("additional_tools");
+	});
+
+	it("uses standard Responses when the model catalog advertises Lite", async () => {
+		const model = createCodexModel("gpt-5.6-terra", { useResponsesLite: true });
 		let captured: CapturedCodexRequest | undefined;
 		const fetchMock = createCodexFetchMock(createCodexSse(COMPLETED_CODEX_EVENTS), request => {
 			captured = request;
@@ -683,13 +712,13 @@ describe("openai-codex Responses Lite and client metadata wire format", () => {
 		}).result();
 
 		expect(result.stopReason).toBe("stop");
-		expect(captured!.headers.get("x-openai-internal-codex-responses-lite")).toBe("true");
+		expect(captured).toBeDefined();
+		expect(captured!.headers.get("x-openai-internal-codex-responses-lite")).toBeNull();
 		expect(captured!.headers.get("version")).toBe("0.144.1");
 		const body = captured!.body;
-		expect(body.reasoning).toEqual({ context: "all_turns" });
-		expect(body.instructions).toBeUndefined();
-		expect(body.tools).toBeUndefined();
-		expect((body.input as Array<Record<string, unknown>>)[0]?.type).toBe("additional_tools");
+		expect(body.reasoning).toBeUndefined();
+		expect(body.instructions).toBe("You are a helpful assistant.");
+		expect((body.input as Array<Record<string, unknown>>)[0]?.role).toBe("user");
 	});
 
 	it("omits the lite marker while retaining canonical client_metadata", async () => {
