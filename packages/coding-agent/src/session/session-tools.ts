@@ -233,6 +233,8 @@ export class SessionTools {
 	#xdev: XdevState | undefined;
 	#pendingToolRosterDelta: { added: Set<string>; removed: Set<string> } | undefined;
 	#pendingToolRosterDeltaAfterBase: { added: Set<string>; removed: Set<string> } | undefined;
+	/** Retains the write transport after the last MCP device disconnects; explicit runtime removal clears it. */
+	#stickyTransportWrite = false;
 	#pendingXdevMountDelta: { added: Set<string>; removed: Set<string> } | undefined;
 	/**
 	 * Whether the current {@link #baseSystemPrompt} is a newer roster snapshot than
@@ -896,7 +898,12 @@ export class SessionTools {
 		);
 	}
 
-	async #applyActiveToolsByName(toolNames: string[], forcePromptRefresh = false, signal?: AbortSignal): Promise<void> {
+	async #applyActiveToolsByName(
+		toolNames: string[],
+		forcePromptRefresh = false,
+		signal?: AbortSignal,
+		allowTransportWrite = true,
+	): Promise<void> {
 		signal?.throwIfAborted();
 		toolNames = normalizeToolNames(toolNames);
 		const codeMode = resolveCodeMode({
@@ -966,10 +973,12 @@ export class SessionTools {
 		const pinnedWrite = isPresentationPinned("write");
 		const activeDeferrableTool = tools.some(tool => tool.deferrable === true);
 		const transportNeeded =
-			(this.#xdev?.catalog.size ?? 0) > 0 ||
-			mountNames.size > 0 ||
-			activeDeferrableTool ||
-			this.#host.planModeEnabled();
+			allowTransportWrite &&
+			(this.#stickyTransportWrite ||
+				(this.#xdev?.catalog.size ?? 0) > 0 ||
+				mountNames.size > 0 ||
+				activeDeferrableTool ||
+				this.#host.planModeEnabled());
 		if (transportNeeded && !builtInWriteAvailable) {
 			const writeRegistration = this.#ensureWriteRegistered?.();
 			builtInWriteAvailable = writeRegistration ? (await untilAborted(signal, writeRegistration)) === true : false;
@@ -1503,12 +1512,10 @@ export class SessionTools {
 	setActiveToolsByName(toolNames: string[]): Promise<void> {
 		return this.runToolRegistryMutation(async () => {
 			const normalized = normalizeToolNames(toolNames);
-			// Transport-write eligibility keys off the *current* active set: an ordinary
-			// selection change should not demote `write` unless it is already active.
 			await this.#applyToolPresentation(
 				normalized,
 				this.#xdev?.mountedNames ?? new Set(),
-				this.getActiveToolNames().includes("write"),
+				normalized.includes("write"),
 			);
 		});
 	}
@@ -1585,13 +1592,16 @@ export class SessionTools {
 			((this.#host.planModeEnabled() && (!writeSelected || deviceOnlyWriteActive)) ||
 				(writeSelected && deviceOnlyWriteActive && (retainedMountedDevice || retainedDeferrableTool)));
 		const previousRuntimeSelectedToolNames = this.#runtimeSelectedToolNames;
+		const previousStickyTransportWrite = this.#stickyTransportWrite;
+		if (!writeSelected) this.#stickyTransportWrite = false;
 		this.#runtimeSelectedToolNames = new Set(
 			normalized.filter(name => !mounted.has(name) && !(name === "write" && transportWriteActive)),
 		);
 		try {
-			await this.#applyActiveToolsByName(normalized, forcePromptRefresh, signal);
+			await this.#applyActiveToolsByName(normalized, forcePromptRefresh, signal, writeSelected);
 		} catch (error) {
 			this.#runtimeSelectedToolNames = previousRuntimeSelectedToolNames;
+			this.#stickyTransportWrite = previousStickyTransportWrite;
 			throw error;
 		}
 	}
@@ -1941,9 +1951,19 @@ export class SessionTools {
 				...retainedActiveExtensionToolNames,
 			]),
 		];
+		const disconnectedLastMcpDevice =
+			reconciledTools.length === 0 &&
+			previousMcpTools.size > 0 &&
+			!nextActive.some(name => {
+				const tool = this.#toolRegistry.get(name);
+				return tool ? isMountableUnderXdev(tool) : false;
+			});
+		const previousStickyTransportWrite = this.#stickyTransportWrite;
+		if (disconnectedLastMcpDevice) this.#stickyTransportWrite = true;
 		try {
 			await this.#applyActiveToolsByName(nextActive);
 			if (this.#host.isDisposed()) {
+				this.#stickyTransportWrite = previousStickyTransportWrite;
 				restorePreviousMcpTools();
 			} else {
 				// The settled mutation promise may retain this async frame; drop
@@ -1951,6 +1971,7 @@ export class SessionTools {
 				previousMcpTools.clear();
 			}
 		} catch (error) {
+			this.#stickyTransportWrite = previousStickyTransportWrite;
 			restorePreviousMcpTools();
 			throw error;
 		}
