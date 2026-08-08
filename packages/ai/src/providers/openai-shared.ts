@@ -3505,10 +3505,7 @@ export function buildResponsesDeltaInput<TItem extends ResponseInputItem | Input
  * items (enough to identify WHICH message moved — e.g. crew-mail `#NNNN`
  * prefixes — without dumping bodies).
  */
-export function summarizeResponsesInputItems(
-	items: readonly unknown[] | undefined,
-	max = 16,
-): string[] {
+export function summarizeResponsesInputItems(items: readonly unknown[] | undefined, max = 16): string[] {
 	if (!Array.isArray(items)) return ["<no input array>"];
 	const lines = items.slice(0, max).map((raw, i) => {
 		const item = (raw ?? {}) as Record<string, unknown>;
@@ -3520,8 +3517,7 @@ export function summarizeResponsesInputItems(
 			hint = content;
 		} else if (Array.isArray(content)) {
 			const firstText = content.find(
-				(part): part is { text: string } =>
-					!!part && typeof (part as { text?: unknown }).text === "string",
+				(part): part is { text: string } => !!part && typeof (part as { text?: unknown }).text === "string",
 			);
 			hint = firstText?.text ?? "";
 		}

@@ -343,9 +343,7 @@ export function xdevEntries(state: XdevState): Array<{ name: string; summary: st
 }
 
 /** Sticky prompt entries used only by the system prompt. */
-export function xdevCatalogEntries(
-	state: XdevState,
-): Array<{ name: string; summary: string; dynamic: boolean }> {
+export function xdevCatalogEntries(state: XdevState): Array<{ name: string; summary: string; dynamic: boolean }> {
 	return listXdevCatalogTools(state).map(tool => xdevEntry(state, tool));
 }
 

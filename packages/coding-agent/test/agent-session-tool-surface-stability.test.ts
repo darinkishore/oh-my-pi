@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { Message, Model } from "@oh-my-pi/pi-ai";
 import { createMockModel, type MockResponseSource } from "@oh-my-pi/pi-ai/providers/mock";
@@ -14,7 +15,6 @@ import {
 	type XdevState,
 	xdevDocsAll,
 } from "@oh-my-pi/pi-coding-agent/tools/xdev";
-import { type } from "arktype";
 
 // Deterministic tool-surface invariant: the bytes of the wire tools array and
 // the system prompt must not depend on WHEN a device mounts or unmounts. Live

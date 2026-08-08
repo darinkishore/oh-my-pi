@@ -1036,6 +1036,7 @@ describe("Responses Lite remote compaction", () => {
 			fetch: fetchMock,
 			providerSessionState: new Map<string, ProviderSessionState>(),
 			codexCompaction: TEST_CODEX_COMPACTION,
+			responsesLite: true,
 		});
 
 		expect(captured?.headers.get("x-openai-internal-codex-responses-lite")).toBe("true");

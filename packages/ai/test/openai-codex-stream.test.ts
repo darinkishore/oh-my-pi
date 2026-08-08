@@ -3589,7 +3589,7 @@ describe("openai-codex streaming", () => {
 				this.scheduleOpen();
 			}
 
-			send(data: string): void {
+			override send(data: string): void {
 				sentRequests.push(JSON.parse(data) as Record<string, unknown>);
 				const n = sentRequests.length;
 				const serverMetadata = { turn_id: `turn-${n}` };
