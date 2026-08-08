@@ -199,6 +199,9 @@
 ### Fixed
 
 - Fixed account-scoped Codex cyber-policy denials bypassing sibling credential rotation; replay-safe requests now try every configured account before surfacing the error.
+### Changed
+
+- Codex requests now default to the standard Responses body even when the model catalog advertises Responses Lite. Lite remains available through an explicit `responsesLite: true` request option or `PI_CODEX_RESPONSES_LITE=1`.
 
 ## [17.2.11] - 2026-08-07
 
