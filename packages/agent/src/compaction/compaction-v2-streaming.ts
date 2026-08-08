@@ -10,7 +10,10 @@
 import type { Api, CodexCompactionContext, FetchImpl, Model, ProviderSessionState } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { createOpenAICodexCompactionRequestContext } from "@oh-my-pi/pi-ai/providers/openai-codex-compaction";
-import { applyCodexResponsesLiteShape } from "@oh-my-pi/pi-ai/providers/openai-codex/request-transformer";
+import {
+	applyCodexResponsesLiteShape,
+	resolveCodexResponsesLite,
+} from "@oh-my-pi/pi-ai/providers/openai-codex/request-transformer";
 import {
 	createOpenAICodexCompatibilityMetadata,
 	openCodexCompactionEventStream,
@@ -265,6 +268,7 @@ export async function requestCompactionV2Streaming(
 		providerSessionState?: Map<string, ProviderSessionState>;
 		codexCompaction?: CodexCompactionContext;
 		preferWebsockets?: boolean;
+		responsesLite?: boolean;
 	},
 ): Promise<CompactionV2Response> {
 	let fetchImpl: FetchImpl = options?.fetch ?? globalThis.fetch;
@@ -282,6 +286,10 @@ export async function requestCompactionV2Streaming(
 
 	const retryWait = options?.retryWait ?? ((delayMs: number) => Bun.sleep(delayMs));
 	const isCodexResponses = compactionV2Api(model) === "openai-codex-responses" || model.provider === "openai-codex";
+	const responsesLite =
+		model.api === "openai-codex-responses"
+			? resolveCodexResponsesLite(model as Model<"openai-codex-responses">, options?.responsesLite)
+			: false;
 	const codexMetadata =
 		isCodexResponses && !shouldUseCodexProviderTransport(model)
 			? createOpenAICodexCompatibilityMetadata({
@@ -304,6 +312,7 @@ export async function requestCompactionV2Streaming(
 				providerSessionState: options?.providerSessionState,
 				codexCompaction: options?.codexCompaction,
 				preferWebsockets: options?.preferWebsockets,
+				responsesLite,
 			});
 		} catch (err) {
 			const error = err instanceof Error ? err : new Error(String(err));
@@ -340,6 +349,7 @@ async function attemptCompactionV2Streaming(
 		providerSessionState?: Map<string, ProviderSessionState>;
 		codexCompaction?: CodexCompactionContext;
 		preferWebsockets?: boolean;
+		responsesLite: boolean;
 	},
 ): Promise<CompactionV2Response> {
 	// Faithful to Codex: append the compaction trigger as the final input item
@@ -363,7 +373,7 @@ async function attemptCompactionV2Streaming(
 			sessionId: request.sessionId,
 			providerSessionState: options.providerSessionState,
 			preferWebsockets: options.preferWebsockets,
-			responsesLite: model.useResponsesLite,
+			responsesLite: options.responsesLite,
 			codexCompaction: createOpenAICodexCompactionRequestContext({
 				context: options.codexCompaction,
 				implementation: "responses_compaction_v2",
