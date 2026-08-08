@@ -9,7 +9,10 @@
 
 import type { Api, CodexCompactionContext, FetchImpl, Model, ProviderSessionState } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { applyCodexResponsesLiteShape } from "@oh-my-pi/pi-ai/providers/openai-codex/request-transformer";
+import {
+	applyCodexResponsesLiteShape,
+	resolveCodexResponsesLite,
+} from "@oh-my-pi/pi-ai/providers/openai-codex/request-transformer";
 import {
 	createOpenAICodexCompactionRequestContext,
 	createOpenAICodexCompatibilityMetadata,
@@ -252,6 +255,7 @@ export async function requestCompactionV2Streaming(
 		providerSessionState?: Map<string, ProviderSessionState>;
 		codexCompaction?: CodexCompactionContext;
 		preferWebsockets?: boolean;
+		responsesLite?: boolean;
 	},
 ): Promise<CompactionV2Response> {
 	const endpoint = getCompactionV2Endpoint(model);
@@ -262,6 +266,10 @@ export async function requestCompactionV2Streaming(
 	const fetchImpl = options?.fetch ?? globalThis.fetch;
 	const retryWait = options?.retryWait ?? ((delayMs: number) => Bun.sleep(delayMs));
 	const isCodexResponses = compactionV2Api(model) === "openai-codex-responses" || model.provider === "openai-codex";
+	const responsesLite =
+		model.api === "openai-codex-responses"
+			? resolveCodexResponsesLite(model as Model<"openai-codex-responses">, options?.responsesLite)
+			: false;
 	const codexMetadata =
 		isCodexResponses && !shouldUseCodexProviderTransport(model)
 			? createOpenAICodexCompatibilityMetadata({
@@ -284,6 +292,7 @@ export async function requestCompactionV2Streaming(
 				providerSessionState: options?.providerSessionState,
 				codexCompaction: options?.codexCompaction,
 				preferWebsockets: options?.preferWebsockets,
+				responsesLite,
 			});
 		} catch (err) {
 			const error = err instanceof Error ? err : new Error(String(err));
@@ -320,6 +329,7 @@ async function attemptCompactionV2Streaming(
 		providerSessionState?: Map<string, ProviderSessionState>;
 		codexCompaction?: CodexCompactionContext;
 		preferWebsockets?: boolean;
+		responsesLite: boolean;
 	},
 ): Promise<CompactionV2Response> {
 	// Faithful to Codex: append the compaction trigger as the final input item
@@ -333,10 +343,10 @@ async function attemptCompactionV2Streaming(
 		instructions: request.instructions,
 		stream: true,
 		store: false,
-		...(request.reasoning || model.useResponsesLite
+		...(request.reasoning || options.responsesLite
 			? {
 					// Lite implies gpt-5.4+, where codex-rs sends `all_turns` replay.
-					reasoning: model.useResponsesLite
+					reasoning: options.responsesLite
 						? { ...(request.reasoning ?? {}), context: "all_turns" }
 						: request.reasoning,
 					include: ["reasoning.encrypted_content"],
@@ -351,7 +361,7 @@ async function attemptCompactionV2Streaming(
 	// Responses Lite models take the same rewrite on the compaction stream:
 	// instructions/tools ride as input items (codex-rs `compact_remote_v2`
 	// builds through `build_responses_request`).
-	if (model.useResponsesLite) {
+	if (options.responsesLite) {
 		applyCodexResponsesLiteShape(body);
 	}
 
@@ -363,7 +373,7 @@ async function attemptCompactionV2Streaming(
 			sessionId: request.sessionId,
 			providerSessionState: options.providerSessionState,
 			preferWebsockets: options.preferWebsockets,
-			responsesLite: model.useResponsesLite,
+			responsesLite: options.responsesLite,
 			codexCompaction: createOpenAICodexCompactionRequestContext({
 				context: options.codexCompaction,
 				implementation: "responses_compaction_v2",
