@@ -110,12 +110,11 @@ import {
 	applyOpenAIServiceTier,
 	applyReasoningSummaryDone,
 	buildResponsesDeltaInput,
-	describeResponsesDeltaMismatch,
-	summarizeResponsesInputItems,
 	computerCallMetadata,
 	convertResponsesAssistantMessage,
 	convertResponsesInputContent,
 	createSequentialCutoffSummaryState,
+	describeResponsesDeltaMismatch,
 	encodeResponsesToolCallId,
 	encodeTextSignatureV1,
 	escapeReplayedControlTokens,
@@ -132,6 +131,7 @@ import {
 	populateResponsesUsageFromResponse,
 	promoteResponsesToolUseStopReason,
 	type SequentialCutoffSummaryState,
+	summarizeResponsesInputItems,
 } from "./openai-shared";
 import { redactSensitiveInObject, transformMessages } from "./transform-messages";
 
@@ -3610,11 +3610,7 @@ function buildCodexChainedRequestBody(
 				"Codex websocket turn chaining has failed to engage repeatedly; requests are re-sending full context every call (prompt cache likely cold past the instructions prefix)",
 				{
 					consecutiveResets: streak,
-					mismatch: describeResponsesDeltaMismatch(
-						state.lastRequest,
-						state.lastResponseItems,
-						requestBody,
-					),
+					mismatch: describeResponsesDeltaMismatch(state.lastRequest, state.lastResponseItems, requestBody),
 					prevInputMap: summarizeResponsesInputItems(state.lastRequest?.input),
 					currentInputMap: summarizeResponsesInputItems(requestBody.input),
 					prevResponseItemsMap: summarizeResponsesInputItems(state.lastResponseItems, 6),
