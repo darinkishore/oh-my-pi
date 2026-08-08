@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Codex requests now default to the standard Responses body even when the model catalog advertises Responses Lite. Lite remains available through an explicit `responsesLite: true` request option or `PI_CODEX_RESPONSES_LITE=1`.
+
 ## [17.2.11] - 2026-08-07
 
 ### Breaking Changes

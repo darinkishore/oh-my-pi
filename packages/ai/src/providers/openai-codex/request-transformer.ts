@@ -94,19 +94,19 @@ export interface RequestBody {
 /**
  * Resolve whether a Codex request uses the Responses Lite transport: an
  * explicit option wins, then the `PI_CODEX_RESPONSES_LITE` env override
- * (`1`/`true` forces Lite, `0`/`false` forces the full Responses body),
- * otherwise the model's catalog flag (codex-rs `model_info.use_responses_lite`)
- * decides.
+ * (`1`/`true` forces Lite, `0`/`false` forces the full Responses body).
+ * Otherwise OMP defaults to the standard Responses body, even when the model
+ * catalog advertises Lite support.
  */
 export function resolveCodexResponsesLite(
-	model: Model<"openai-codex-responses">,
+	_model: Model<"openai-codex-responses">,
 	requested: boolean | undefined,
 ): boolean {
 	if (requested !== undefined) return requested;
 	const env = $env.PI_CODEX_RESPONSES_LITE?.trim().toLowerCase();
 	if (env === "1" || env === "true") return true;
 	if (env === "0" || env === "false") return false;
-	return model.useResponsesLite === true;
+	return false;
 }
 
 /**
