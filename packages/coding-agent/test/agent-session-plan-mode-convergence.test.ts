@@ -163,6 +163,7 @@ describe("AgentSession plan-mode convergence", () => {
 			? {
 					tools: toolRegistry,
 					mountedNames: new Set<string>(),
+					catalog: new Map(),
 					builtInNames: new Set(["ask", "write", "read"]),
 					isActive: name => currentAgent?.state.tools.some(tool => tool.name === name) ?? false,
 				}
