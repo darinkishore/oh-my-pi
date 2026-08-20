@@ -1518,6 +1518,7 @@ export { parseArgs } from "../cli/args";
 export * from "../index";
 export { formatBytes as formatSize } from "../tools/render-utils";
 export { copyToClipboard } from "../utils/clipboard";
+export { resizeImage } from "../utils/image-resize";
 export { Type } from "./legacy-typebox";
 
 // Legacy pi's `@earendil-works/pi-coding-agent` root exported an `is<Tool>ToolResult`
