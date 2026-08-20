@@ -85,7 +85,7 @@ function mountNoticesIn(messages: Message[]): string[] {
 			typeof content === "string"
 				? content
 				: content.flatMap(part => (part.type === "text" ? [part.text] : [])).join("");
-		return text.includes("The xd:// device inventory changed.") ? [text] : [];
+		return text.includes("xd:// device inventory changed.") ? [text] : [];
 	});
 }
 
@@ -102,7 +102,6 @@ describe("AgentSession deterministic tool surface", () => {
 		rebuildSystemPrompt: (toolNames: string[]) => Promise<string>,
 		options: {
 			xdev: XdevState;
-			getLocalCalendarDate?: () => string;
 			responses?: MockResponseSource;
 		},
 	): {
@@ -146,7 +145,6 @@ describe("AgentSession deterministic tool surface", () => {
 			rebuildSystemPrompt: async (toolNames, _tools) => ({
 				systemPrompt: [await rebuildSystemPrompt(toolNames)],
 			}),
-			getLocalCalendarDate: options.getLocalCalendarDate,
 			xdev: options.xdev,
 		});
 		sessions.push(session);
@@ -163,7 +161,6 @@ describe("AgentSession deterministic tool surface", () => {
 		// live mount set, silently dropping the unmounted device's docs and
 		// re-keying the cached prefix. Docs must come from the sticky catalog.
 		const xdev = createXdevState();
-		let date = "2026-07-24";
 		let rebuildCount = 0;
 		let lastPrompt = "";
 		const { session } = newSession(
@@ -172,7 +169,7 @@ describe("AgentSession deterministic tool surface", () => {
 				lastPrompt = `tools:${toolNames.join(",")}|docs:${xdevDocsAll(xdev)}`;
 				return lastPrompt;
 			},
-			{ xdev, getLocalCalendarDate: () => date },
+			{ xdev },
 		);
 		const search = createMcpCustomTool("mcp__nucleus_search", "nucleus", "search", "Search nucleus");
 		const fetch = createMcpCustomTool("mcp__nucleus_fetch", "nucleus", "fetch", "Fetch nucleus");
@@ -188,10 +185,9 @@ describe("AgentSession deterministic tool surface", () => {
 		expect(rebuildCount).toBe(2);
 		expect(lastPrompt).toContain("mcp__nucleus_fetch");
 
-		// An unrelated rebuild trigger (calendar rollover) must NOT swallow the
-		// inventory delta: fetch stays documented even though it is unmounted.
-		date = "2026-07-25";
-		await session.refreshMCPTools([search]);
+		// An unrelated forced rebuild must NOT swallow the inventory delta: fetch
+		// stays documented even though it is unmounted.
+		await session.setActiveToolPresentation(session.getEnabledToolNames(), session.getMountedXdevToolNames(), true);
 		expect(rebuildCount).toBe(3);
 		expect(lastPrompt).toContain("mcp__nucleus_search");
 		expect(lastPrompt).toContain("mcp__nucleus_fetch");

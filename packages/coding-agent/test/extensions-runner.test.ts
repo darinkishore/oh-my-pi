@@ -4045,6 +4045,9 @@ describe("ExtensionRunner", () => {
 				commands: new Map(),
 				flags: new Map(),
 				shortcuts: new Map(),
+				busDisposers: [],
+				activateEventSubscriptions: () => {},
+				disposeEventSubscriptions: () => {},
 			};
 			return new ExtensionRunner([extension], new ExtensionRuntime(), tempDir.path(), sessionManager, modelRegistry);
 		};
