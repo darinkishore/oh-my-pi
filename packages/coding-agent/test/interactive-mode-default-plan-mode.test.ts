@@ -347,10 +347,10 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 		expect(created.planModeEnabled).toBe(false);
 		expect(session?.getPlanModeState()).toBeUndefined();
 		expect(session?.model?.id).toBe(previousModel?.id);
-		// Restoring the pre-plan tool set drops the MCP device and plan-only
-		// selections; `write` persists because the session's sticky device
-		// catalog keeps the transport for its lifetime (deterministic surface).
-		expect(session?.getActiveToolNames()).toEqual(["read", "write"]);
+		// A successful explicit plan exit restores the exact pre-plan selection.
+		// Sticky transport only absorbs provider-driven MCP churn; it must not
+		// override an intentional mode transition back to a read-only slate.
+		expect(session?.getActiveToolNames()).toEqual(["read"]);
 		expect(session?.getMountedXdevToolNames()).toEqual([]);
 		expect(xdev.tools.has(mountedTool.name)).toBe(true);
 		expect(resolveXdevTool(xdev, mountedTool.name)).toBeUndefined();
