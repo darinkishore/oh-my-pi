@@ -1168,6 +1168,13 @@ describe("AgentSession handoff", () => {
 			throw new Error("Expected model to be set");
 		}
 		const handoffSpy = vi.spyOn(session, "handoff");
+		const compactSpy = vi.spyOn(compactionModule, "compact").mockImplementation(async preparation => ({
+			summary: "overflow fallback",
+			shortSummary: undefined,
+			firstKeptEntryId: preparation.firstKeptEntryId,
+			tokensBefore: preparation.tokensBefore,
+			details: {},
+		}));
 
 		const overflowAssistant: AssistantMessage = {
 			role: "assistant",
@@ -1193,6 +1200,7 @@ describe("AgentSession handoff", () => {
 		await waitFor(() => events.filter(event => event.type === "auto_compaction_end").length === 1);
 
 		expect(handoffSpy).not.toHaveBeenCalled();
+		expect(compactSpy).toHaveBeenCalledTimes(1);
 		const startEvents = events.filter(event => event.type === "auto_compaction_start");
 		expect(startEvents).toHaveLength(1);
 		expect(startEvents[0]).toMatchObject({ type: "auto_compaction_start", reason: "overflow" });
@@ -1509,6 +1517,13 @@ describe("AgentSession handoff", () => {
 		};
 
 		const generateHandoffSpy = vi.spyOn(compactionModule, "generateHandoffFromContext").mockResolvedValue("");
+		const compactSpy = vi.spyOn(compactionModule, "compact").mockImplementation(async preparation => ({
+			summary: "soft fallback",
+			shortSummary: undefined,
+			firstKeptEntryId: preparation.firstKeptEntryId,
+			tokensBefore: preparation.tokensBefore,
+			details: {},
+		}));
 
 		session.agent.emitExternalEvent({ type: "message_end", message: assistantMessage });
 		session.agent.emitExternalEvent({ type: "agent_end", messages: [assistantMessage] });
@@ -1517,6 +1532,7 @@ describe("AgentSession handoff", () => {
 		);
 
 		expect(generateHandoffSpy).toHaveBeenCalledTimes(1);
+		expect(compactSpy).toHaveBeenCalledTimes(1);
 		const endEvents = events.filter(event => event.type === "auto_compaction_end");
 		expect(endEvents).toHaveLength(2);
 		expect(endEvents[0]).toMatchObject({
