@@ -44,7 +44,9 @@ describe("loadExtensions per-session binding (#2190 review fix)", () => {
 				"    configurable: true,",
 				"  });",
 				"  globalThis.__bindings = globalThis.__bindings || [];",
-				"  globalThis.__bindings.push({ events: api.events });",
+				"  const binding = { events: api.events, seen: [] };",
+				"  api.events.on('binding-probe', value => binding.seen.push(value));",
+				"  globalThis.__bindings.push(binding);",
 				"}",
 			].join("\n"),
 		);
@@ -78,9 +80,17 @@ describe("loadExtensions per-session binding (#2190 review fix)", () => {
 		expect(subagent.runtime).not.toBe(parent.runtime);
 
 		// Each factory saw the eventBus passed to its own loadExtensions call.
-		const bindings = (globalThis as { __bindings?: { events: EventBus }[] }).__bindings ?? [];
+		const bindings = (globalThis as { __bindings?: { events: EventBus; seen: string[] }[] }).__bindings ?? [];
 		expect(bindings).toHaveLength(2);
-		expect(bindings[0]?.events).toBe(parentEventBus);
-		expect(bindings[1]?.events).toBe(subagentEventBus);
+		// Transactional reload exposes an extension-owned scoped view rather than
+		// the shared bus itself. Each view must remain distinct and route only to
+		// the bus supplied for that session.
+		expect(bindings[0]?.events).not.toBe(parentEventBus);
+		expect(bindings[1]?.events).not.toBe(subagentEventBus);
+		expect(bindings[0]?.events).not.toBe(bindings[1]?.events);
+		parentEventBus.emit("binding-probe", "parent");
+		subagentEventBus.emit("binding-probe", "subagent");
+		expect(bindings[0]?.seen).toEqual(["parent"]);
+		expect(bindings[1]?.seen).toEqual(["subagent"]);
 	});
 });
