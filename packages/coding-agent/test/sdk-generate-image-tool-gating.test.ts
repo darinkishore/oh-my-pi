@@ -212,7 +212,8 @@ describe("generate_image tool gating", () => {
 	// wire tools array at the 0↔1 boundary and invalidated the provider prompt
 	// cache from position 0 on every MCP disconnect.
 	it("keeps transport-only write after the last MCP device disconnects", async () => {
-		const session = await sessionWithCustomTools(["read"], [customTool("mcp__test__search", true)]);
+		const session = await sessionWithCustomTools(["read"], []);
+		await session.refreshMCPTools([customTool("mcp__test__search", true)]);
 		expect(session.getActiveToolNames()).toContain("mcp__test__search");
 		expect(session.getActiveToolNames()).not.toContain("write");
 		expect(session.getXdevToolEntries()).toEqual([]);
@@ -223,7 +224,8 @@ describe("generate_image tool gating", () => {
 	});
 
 	it("keeps transport-only write across enabled-set round trips", async () => {
-		const session = await sessionWithCustomTools(["read"], [customTool("mcp__test__search", true)]);
+		const session = await sessionWithCustomTools(["read"], []);
+		await session.refreshMCPTools([customTool("mcp__test__search", true)]);
 		expect(session.getActiveToolNames()).not.toContain("write");
 
 		await session.setActiveToolsByName(session.getEnabledToolNames());
