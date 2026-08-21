@@ -3183,7 +3183,7 @@ describe("openai-codex streaming", () => {
 		expect(continuationMetadata["x-codex-turn-metadata"]).toBe(continuationHeaders.get("x-codex-turn-metadata"));
 	});
 
-	it("clears stale main turn-state after pre-turn compaction", async () => {
+	it("lets pre-turn compaction seed the following sample's turn-state", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
 		setAgentDir(tempDir.path());
 		const token = createCodexTestToken();
@@ -3191,13 +3191,14 @@ describe("openai-codex streaming", () => {
 		let websocketRequestCount = 0;
 
 		class PreTurnCompactionWebSocket extends MockWebSocket {
-			handshakeHeaders = {
-				"x-codex-turn-state": "stale-main-turn-state",
-				"x-models-etag": "models-etag-1",
-			};
+			handshakeHeaders: Record<string, string>;
 
 			constructor(url: string, options?: { headers?: WsHeaders }) {
 				super(url, options);
+				this.handshakeHeaders = {
+					"x-codex-turn-state": websocketInstances.length === 0 ? "prior-turn-state" : "compaction-turn-state",
+					"x-models-etag": "models-etag-1",
+				};
 				websocketInstances.push(this);
 				queueMicrotask(() => {
 					this.readyState = MockWebSocket.OPEN;
@@ -3281,7 +3282,7 @@ describe("openai-codex streaming", () => {
 				}),
 			).toMatchObject({
 				websocketConnected: true,
-				hasTurnState: false,
+				hasTurnState: true,
 			});
 			await streamOpenAICodexResponses(
 				sseModel,
@@ -3297,7 +3298,7 @@ describe("openai-codex streaming", () => {
 				},
 			).result();
 			expect(fetchMock).toHaveBeenCalledTimes(1);
-			expect(sseHeaders?.get("x-codex-turn-state")).toBeNull();
+			expect(sseHeaders?.get("x-codex-turn-state")).toBe("compaction-turn-state");
 		} finally {
 			for (const state of providerSessionState.values()) state.close();
 			providerSessionState.clear();
@@ -5106,7 +5107,7 @@ describe("openai-codex streaming", () => {
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
-	it("resets append state and stale turn headers when websocket requests diverge", async () => {
+	it("keeps the turn-state when a same-turn websocket append diverges", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
 		setAgentDir(tempDir.path());
 
@@ -5133,6 +5134,8 @@ describe("openai-codex streaming", () => {
 		});
 
 		const requestTypes: string[] = [];
+		const websocketTurnStates: Array<string | null> = [];
+		const previousResponseIds: Array<string | null> = [];
 		class DivergedAppendWebSocket extends MockWebSocket {
 			handshakeHeaders = {
 				"x-codex-turn-state": "ws-turn-state-1",
@@ -5147,8 +5150,15 @@ describe("openai-codex streaming", () => {
 
 			override send(data: string): void {
 				this.#sendCount += 1;
-				const request = JSON.parse(data) as { type?: string };
+				const request = JSON.parse(data) as {
+					type?: string;
+					previous_response_id?: string;
+					client_metadata?: Record<string, unknown>;
+				};
 				requestTypes.push(typeof request.type === "string" ? request.type : "");
+				const turnState = request.client_metadata?.["x-codex-turn-state"];
+				websocketTurnStates.push(typeof turnState === "string" ? turnState : null);
+				previousResponseIds.push(request.previous_response_id ?? null);
 				const idSuffix = String(this.#sendCount);
 				this.emitCodexResponse({
 					messageId: `msg_${idSuffix}`,
@@ -5182,18 +5192,32 @@ describe("openai-codex streaming", () => {
 			systemPrompt: ["Prompt A"],
 			messages: [{ role: "user", content: "Say hello", timestamp: Date.now() }],
 		};
-		const secondContext: Context = {
-			systemPrompt: ["Prompt B"],
-			messages: [{ role: "user", content: "Say hello", timestamp: Date.now() }],
-		};
 		const providerSessionState = new Map<string, ProviderSessionState>();
 
-		await streamOpenAICodexResponses(websocketModel, firstContext, {
+		const first = await streamOpenAICodexResponses(websocketModel, firstContext, {
 			fetch: fetchMock as FetchImpl,
 			apiKey: token,
 			sessionId: "ws-diverged-session",
 			providerSessionState,
 		}).result();
+		const toolCall = { type: "toolCall" as const, id: "call_diverge|fc_diverge", name: "todo", arguments: {} };
+		const secondContext: Context = {
+			// The instruction change makes the append options diverge, while the
+			// trailing tool result keeps this inside the same logical user turn.
+			systemPrompt: ["Prompt B"],
+			messages: [
+				...firstContext.messages,
+				{ ...first, stopReason: "toolUse" as const, content: [...first.content, toolCall] },
+				{
+					role: "toolResult" as const,
+					toolCallId: toolCall.id,
+					toolName: toolCall.name,
+					content: [{ type: "text" as const, text: "done" }],
+					isError: false,
+					timestamp: Date.now(),
+				},
+			],
+		};
 		await streamOpenAICodexResponses(websocketModel, secondContext, {
 			fetch: fetchMock as FetchImpl,
 			apiKey: token,
@@ -5208,8 +5232,10 @@ describe("openai-codex streaming", () => {
 		}).result();
 
 		expect(requestTypes).toEqual(["response.create", "response.create"]);
+		expect(websocketTurnStates).toEqual([null, "ws-turn-state-1"]);
+		expect(previousResponseIds).toEqual([null, null]);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
-		expect(sseTurnStates[0]).toBeNull();
+		expect(sseTurnStates[0]).toBe("ws-turn-state-1");
 		expect(sseModelsEtags[0]).toBeNull();
 	});
 
@@ -5352,10 +5378,10 @@ describe("openai-codex streaming", () => {
 			const index = callCount;
 			callCount += 1;
 			const sse =
-				index === 0
+				index < 2
 					? `${[
-							`data: ${JSON.stringify({ type: "response.output_item.added", item: { type: "function_call", id: "fc_1", call_id: "call_1", name: "read_file", arguments: "" } })}`,
-							`data: ${JSON.stringify({ type: "response.output_item.done", item: { type: "function_call", id: "fc_1", call_id: "call_1", name: "read_file", arguments: '{"path":"README.md"}' } })}`,
+							`data: ${JSON.stringify({ type: "response.output_item.added", item: { type: "function_call", id: `fc_${index + 1}`, call_id: `call_${index + 1}`, name: "read_file", arguments: "" } })}`,
+							`data: ${JSON.stringify({ type: "response.output_item.done", item: { type: "function_call", id: `fc_${index + 1}`, call_id: `call_${index + 1}`, name: "read_file", arguments: '{"path":"README.md"}' } })}`,
 							`data: ${JSON.stringify({ type: "response.completed", response: { status: "completed", usage: { input_tokens: 5, output_tokens: 3, total_tokens: 8, input_tokens_details: { cached_tokens: 0 } } } })}`,
 						].join("\n\n")}\n\n`
 					: `${[
@@ -5410,6 +5436,24 @@ describe("openai-codex streaming", () => {
 			{ systemPrompt, messages: [firstUser, first, toolResult] },
 			options,
 		).result();
+		const secondToolCall = second.content.find(
+			(c): c is Extract<(typeof second.content)[number], { type: "toolCall" }> => c.type === "toolCall",
+		);
+		const secondToolResult = {
+			role: "toolResult" as const,
+			toolCallId: secondToolCall!.id,
+			toolName: secondToolCall!.name,
+			content: [{ type: "text" as const, text: "more file contents" }],
+			isError: false,
+			timestamp: Date.now(),
+		};
+		// A later response may advertise another value, but the first value owns
+		// the turn just as codex-rs's OnceLock does.
+		const third = await streamOpenAICodexResponses(
+			model,
+			{ systemPrompt, messages: [firstUser, first, toolResult, second, secondToolResult] },
+			options,
+		).result();
 		// A new user turn starts without it, even though the previous response minted one.
 		await streamOpenAICodexResponses(
 			model,
@@ -5420,13 +5464,15 @@ describe("openai-codex streaming", () => {
 					first,
 					toolResult,
 					second,
+					secondToolResult,
+					third,
 					{ role: "user" as const, content: "Next task", timestamp: Date.now() + 1 },
 				],
 			},
 			options,
 		).result();
 
-		expect(requestTurnStates).toEqual([null, "turn-state-1", null]);
+		expect(requestTurnStates).toEqual([null, "turn-state-1", "turn-state-1", null]);
 	});
 
 	it("captures x-codex-turn-state from response.metadata event headers", async () => {

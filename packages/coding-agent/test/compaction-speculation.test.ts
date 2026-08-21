@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { Agent, type AgentMessage } from "@oh-my-pi/pi-agent-core";
 import * as compactionModule from "@oh-my-pi/pi-agent-core/compaction";
-import type { AssistantMessage, Model, UserMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, CodexCompactionContext, Model, UserMessage } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -46,6 +46,7 @@ describe("async speculative compaction", () => {
 	let sessionManager: SessionManager;
 	let maintenance: SessionMaintenance;
 	let events: string[];
+	let codexResetPhases: CodexCompactionContext["phase"][];
 
 	function appendSummarizableConversation(): void {
 		const text = "conversation ".repeat(8_000);
@@ -113,7 +114,9 @@ describe("async speculative compaction", () => {
 			obfuscateTextForProvider: (text: string | undefined) => text,
 			obfuscatePreparationForProvider: <T>(preparation: T) => preparation,
 			closeCodexProviderSessionsForHistoryRewrite: () => {},
-			resetCodexProviderAfterCompaction: () => {},
+			resetCodexProviderAfterCompaction: (compaction: CodexCompactionContext) => {
+				codexResetPhases.push(compaction.phase);
+			},
 			resetPlanReference: () => {},
 			syncTodoPhasesFromBranch: () => {},
 			resetAdvisorRuntimes: () => {},
@@ -156,6 +159,7 @@ describe("async speculative compaction", () => {
 	beforeEach(() => {
 		sessionManager = SessionManager.inMemory();
 		events = [];
+		codexResetPhases = [];
 		appendSummarizableConversation();
 		maintenance = createMaintenance();
 	});
@@ -202,6 +206,25 @@ describe("async speculative compaction", () => {
 		expect(entry?.type === "compaction" ? entry.summary : undefined).toBe("armed summary");
 		expect(compactSpy).toHaveBeenCalledTimes(1);
 		expect(events).toEqual(expect.arrayContaining(["auto_compaction_start", "auto_compaction_end"]));
+		expect(codexResetPhases).toEqual(["standalone_turn"]);
+	});
+
+	it("preserves the live Codex turn when an armed summary lands mid-turn", async () => {
+		vi.spyOn(compactionModule, "compact").mockImplementation(async preparation => ({
+			summary: "mid-turn armed summary",
+			firstKeptEntryId: preparation.firstKeptEntryId,
+			tokensBefore: preparation.tokensBefore,
+			details: {},
+		}));
+		maintenance.maybeStartSpeculativeCompaction(SPECULATION_BAND_START, CONTEXT_WINDOW);
+		await waitForState("armed");
+
+		await maintenance.runAutoCompaction("threshold", false, false, false, {
+			triggerContextTokens: THRESHOLD,
+			phase: "mid_turn",
+		});
+
+		expect(codexResetPhases).toEqual(["mid_turn"]);
 	});
 
 	it("discards an armed summary after a reset boundary and re-summarizes the new branch", async () => {
