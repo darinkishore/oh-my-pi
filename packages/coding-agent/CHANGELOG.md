@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Provisional local patch: fixed an armed speculative compaction clearing Codex sticky turn state when its result was committed during a live tool loop ([#9277](https://github.com/can1357/oh-my-pi/issues/9277)).
+
 ## [17.4.1] - 2026-08-21
 
 ### Added

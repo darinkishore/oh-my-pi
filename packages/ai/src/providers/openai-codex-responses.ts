@@ -458,13 +458,18 @@ export interface OpenAICodexWebSocketDebugStats {
  * websocket connection pooling, and debug stats. The name is historical — SSE-only
  * sessions use it too.
  */
+interface CodexTurnStateCell {
+	value?: string;
+}
+
 type CodexWebSocketSessionState = {
 	disableWebsocket: boolean;
 	lastRequest?: RequestBody;
 	lastResponseId?: string;
 	lastResponseItems?: InputItem[];
 	canAppend: boolean;
-	turnState?: string;
+	/** First server value captured for the current logical turn. */
+	turnState: CodexTurnStateCell;
 	modelsEtag?: string;
 	connection?: CodexWebSocketConnection;
 	lastTransport?: CodexTransport;
@@ -732,7 +737,7 @@ export function resetOpenAICodexHistoryAfterCompaction(options: OpenAICodexCompa
 	if (!isCodexProviderSessionState(providerState)) return;
 	for (const websocketState of providerState.webSocketSessions.values()) {
 		resetCodexWebSocketAppendState(websocketState);
-		if (options.compaction.phase !== "mid_turn") websocketState.turnState = undefined;
+		if (options.compaction.phase === "standalone_turn") websocketState.turnState = {};
 	}
 	const sessionId = normalizeOpenAIPromptCacheKey(options.sessionId);
 	if (!sessionId) return;
@@ -1123,7 +1128,7 @@ function updateCodexSessionMetadataFromHeaders(
 	const resolvedHeaders = headers instanceof Headers ? headers : new Headers(headers);
 	const turnState = resolvedHeaders.get(X_CODEX_TURN_STATE_HEADER);
 	if (turnState && turnState.length > 0) {
-		state.turnState = turnState;
+		state.turnState.value ??= turnState;
 	}
 	const modelsEtag = resolvedHeaders.get(X_MODELS_ETAG_HEADER);
 	if (modelsEtag && modelsEtag.length > 0) {
@@ -1450,6 +1455,8 @@ function createCodexRequestContext(
 			: sharedWebsocketState;
 	if (isolatedTransportState && websocketState && sharedWebsocketState) {
 		websocketState.disableWebsocket = sharedWebsocketState.disableWebsocket;
+		// Transport isolation must not create a second sticky-routing lifetime:
+		// every request in one logical turn shares the same first-write cell.
 		websocketState.turnState = sharedWebsocketState.turnState;
 		websocketState.modelsEtag = sharedWebsocketState.modelsEtag;
 	}
@@ -1459,9 +1466,12 @@ function createCodexRequestContext(
 	const requestKind: OpenAICodexRequestKind = compaction ? "compaction" : "turn";
 	const startNewTurn = resolveCodexStartNewTurn(metadataSession, requestKind, compaction, contextOptions.startNewTurn);
 	if (websocketState && startNewTurn) {
-		// Codex scopes turn-state to one turn. Mid-turn compaction preserves it;
-		// a pre-turn or standalone compaction starts without it.
-		websocketState.turnState = undefined;
+		// A fresh cell mirrors codex-rs's per-turn Arc<OnceLock<String>>. When a
+		// compaction transport is isolated, publish the cell to both transport
+		// states so a pre-turn response can seed the following sample.
+		const turnState: CodexTurnStateCell = {};
+		websocketState.turnState = turnState;
+		if (sharedWebsocketState) sharedWebsocketState.turnState = turnState;
 	}
 	const requestMetadata = createCodexRequestMetadata(metadataSession, requestKind, {
 		startNewTurn,
@@ -1673,7 +1683,7 @@ async function* streamCodexCompactionEvents(
 ): AsyncGenerator<Record<string, unknown>> {
 	let completed = false;
 	const websocketState = requestContext.websocketState;
-	const previousTurnState = websocketState?.turnState;
+	const previousTurnState = websocketState?.turnState.value;
 	const previousModelsEtag = websocketState?.modelsEtag;
 	try {
 		if (initial.transport === "websocket") {
@@ -1708,7 +1718,7 @@ async function* streamCodexCompactionEvents(
 		if (!completed) {
 			requestSetup.requestAbortController.abort();
 			if (websocketState) {
-				websocketState.turnState = previousTurnState;
+				websocketState.turnState.value = previousTurnState;
 				websocketState.modelsEtag = previousModelsEtag;
 			}
 		}
@@ -1716,9 +1726,9 @@ async function* streamCodexCompactionEvents(
 }
 
 /**
- * Capture `x-codex-turn-state`/`x-models-etag` refreshes carried by a
- * `response.metadata` frame so a mid-turn compaction leaves the live session on
- * the latest turn state, matching the normal Codex stream processor.
+ * Capture `x-codex-turn-state`/`x-models-etag` metadata carried by a
+ * `response.metadata` frame. Turn state is first-write-only for the logical
+ * turn; the models etag may still refresh independently.
  */
 function applyCodexCompactionResponseMetadata(
 	state: CodexWebSocketSessionState | undefined,
@@ -1760,8 +1770,8 @@ async function openCodexWebSocketTransport(
 	if (requestContext.responsesLite) {
 		websocketClientMetadata[CODEX_WS_RESPONSES_LITE_CLIENT_METADATA_KEY] = "true";
 	}
-	if (websocketState.turnState) {
-		websocketClientMetadata[X_CODEX_TURN_STATE_HEADER] = websocketState.turnState;
+	if (websocketState.turnState.value) {
+		websocketClientMetadata[X_CODEX_TURN_STATE_HEADER] = websocketState.turnState.value;
 	}
 	let websocketRequest = {
 		type: "response.create",
@@ -1992,7 +2002,6 @@ async function handleCodexStreamFailure(context: CodexStreamFailureContext, erro
 	const { output } = context;
 	if (context.requestContext.websocketState) {
 		resetCodexWebSocketAppendState(context.requestContext.websocketState);
-		context.requestContext.websocketState.turnState = undefined;
 		context.requestContext.websocketState.modelsEtag = undefined;
 	}
 	const result = await AIError.finalize(error, {
@@ -2278,7 +2287,7 @@ class CodexStreamProcessor {
 			// The WebSocket transport has no per-response HTTP headers; codex-rs
 			// mirrors them into this event's `headers` and reads
 			// `x-codex-turn-state` from there (ResponsesStreamEvent::turn_state).
-			// Pick up the refresh so same-turn follow-ups echo the latest turn
+			// Capture the first value so same-turn follow-ups echo the same sticky
 			// state on either transport.
 			updateCodexSessionMetadataFromHeaders(this.requestContext.websocketState, toCodexHeaders(rawEvent.headers));
 			const moderation = asRecord(rawEvent.metadata)?.[CODEX_MODERATION_METADATA_KEY];
@@ -2558,7 +2567,6 @@ class CodexStreamProcessor {
 		const websocketState = this.requestContext.websocketState;
 		if (websocketState) {
 			resetCodexWebSocketAppendState(websocketState);
-			websocketState.turnState = undefined;
 			websocketState.modelsEtag = undefined;
 		}
 
@@ -2684,7 +2692,6 @@ class CodexStreamProcessor {
 
 		this.runtime.providerRetryAttempt += 1;
 		resetCodexWebSocketAppendState(websocketState);
-		websocketState.turnState = undefined;
 		websocketState.modelsEtag = undefined;
 		this.runtime.resetAccumulators();
 		this.runtime.sawTerminalEvent = false;
@@ -2768,7 +2775,6 @@ class CodexStreamProcessor {
 		const websocketState = this.requestContext.websocketState;
 		if (websocketState) {
 			resetCodexWebSocketAppendState(websocketState);
-			websocketState.turnState = undefined;
 			websocketState.modelsEtag = undefined;
 		}
 
@@ -2845,7 +2851,6 @@ class CodexStreamProcessor {
 		if (!this.runtime.sawTerminalEvent) {
 			if (this.requestContext.websocketState) {
 				resetCodexWebSocketAppendState(this.requestContext.websocketState);
-				this.requestContext.websocketState.turnState = undefined;
 				this.requestContext.websocketState.modelsEtag = undefined;
 			}
 			CODEX_DEBUG &&
@@ -2853,7 +2858,7 @@ class CodexStreamProcessor {
 					transport: this.runtime.transport,
 					terminalEventSeen: this.runtime.sawTerminalEvent,
 					unexpectedStreamEnd: true,
-					sentTurnStateHeader: Boolean(this.requestContext.websocketState?.turnState),
+					sentTurnStateHeader: Boolean(this.requestContext.websocketState?.turnState.value),
 					sentModelsEtagHeader: Boolean(this.requestContext.websocketState?.modelsEtag),
 				});
 			throw new CodexProviderStreamError("Codex stream ended before terminal completion event", false);
@@ -3059,6 +3064,7 @@ function getCodexWebSocketSessionState(
 	const created: CodexWebSocketSessionState = {
 		disableWebsocket: false,
 		canAppend: false,
+		turnState: {},
 		fallbackCount: 0,
 		prewarmed: false,
 		stats: {
@@ -3192,7 +3198,7 @@ export function getOpenAICodexTransportDetails(
 		canAppend: state?.canAppend ?? false,
 		prewarmed: state?.prewarmed ?? false,
 		hasSessionState: state !== undefined,
-		hasTurnState: state?.turnState !== undefined,
+		hasTurnState: state?.turnState.value !== undefined,
 		lastFallbackAt: state?.lastFallbackAt,
 	};
 }
@@ -3449,7 +3455,7 @@ function buildCodexChainedRequestBody(
 		// mutated or options changed — break the chain.
 		CODEX_DEBUG &&
 			logger.debug("[codex] codex append reset", {
-				hadTurnStateHeader: Boolean(state.turnState),
+				hadTurnStateHeader: Boolean(state.turnState.value),
 				hadModelsEtagHeader: Boolean(state.modelsEtag),
 			});
 		// A single reset is normal (compaction, steer, options change). A streak
@@ -3471,7 +3477,6 @@ function buildCodexChainedRequestBody(
 			);
 		}
 		resetCodexWebSocketAppendState(state);
-		state.turnState = undefined;
 		state.modelsEtag = undefined;
 		state.appendResetStreak = streak;
 	}
@@ -4331,8 +4336,8 @@ function createCodexHeaders(
 		headers.delete(OPENAI_HEADERS.WINDOW_ID);
 		headers.delete(OPENAI_HEADERS.TURN_METADATA);
 	}
-	if (state?.turnState) {
-		headers.set(X_CODEX_TURN_STATE_HEADER, state.turnState);
+	if (state?.turnState.value) {
+		headers.set(X_CODEX_TURN_STATE_HEADER, state.turnState.value);
 	} else {
 		headers.delete(X_CODEX_TURN_STATE_HEADER);
 	}

@@ -1313,7 +1313,7 @@ describe("Responses Lite remote compaction", () => {
 		}
 	});
 
-	test("V2 compaction over WebSocket captures a refreshed mid-turn x-codex-turn-state", async () => {
+	test("V2 compaction keeps the first x-codex-turn-state for the whole turn", async () => {
 		const midTurnCompaction = { ...TEST_CODEX_COMPACTION, phase: "mid_turn" as const };
 		const providerSessionState = new Map<string, ProviderSessionState>();
 		let responseCount = 0;
@@ -1347,7 +1347,9 @@ describe("Responses Lite remote compaction", () => {
 			const clientMetadata = isRecord(secondRequest?.client_metadata) ? secondRequest.client_metadata : undefined;
 			expect(webSocket.sockets).toHaveLength(1);
 			expect(webSocket.sockets[0]?.sent).toHaveLength(2);
-			expect(clientMetadata?.["x-codex-turn-state"]).toBe("refreshed-turn-state");
+			// The handshake value wins. Later response.metadata values are routing
+			// metadata for the same turn, not replacements for its sticky token.
+			expect(clientMetadata?.["x-codex-turn-state"]).toBe("compaction-state-0");
 			expect(getOpenAICodexTransportDetails(model, { sessionId, providerSessionState })).toMatchObject({
 				hasTurnState: true,
 			});

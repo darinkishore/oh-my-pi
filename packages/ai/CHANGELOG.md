@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Provisional local patch: fixed Codex `x-codex-turn-state` changing or disappearing during same-turn continuations, transport retries, WebSocket full-context fallback, and Responses V2 compaction; the first server value now remains sticky for the logical turn and pre-turn compaction can seed the following sample ([#9277](https://github.com/can1357/oh-my-pi/issues/9277)).
+
 ## [17.4.1] - 2026-08-21
 
 ### Added

@@ -149,6 +149,13 @@ export function createCodexCompactionContext(options: {
 	};
 }
 
+function resolveCodexCompactionPhase(
+	reason: "overflow" | "threshold" | "idle" | "incomplete",
+	phase: CodexCompactionContext["phase"] | undefined,
+): CodexCompactionContext["phase"] {
+	return phase ?? (reason === "threshold" ? "pre_turn" : reason === "idle" ? "standalone_turn" : "mid_turn");
+}
+
 /**
  * Per-turn prune cache window. A tool result whose all-message suffix exceeds
  * this is in the warm, already-sent prompt-cache prefix: re-writing it costs the
@@ -2835,6 +2842,16 @@ export class SessionMaintenance {
 					action,
 					reason,
 				});
+				const applyPhase = resolveCodexCompactionPhase(reason, options.phase);
+				const codexCompaction: CodexCompactionContext | undefined = armedSpec.codexCompaction
+					? {
+							...armedSpec.codexCompaction,
+							// Speculation used a separate provider session. Preserve the
+							// live cell only when the result lands inside an active turn;
+							// otherwise the next sample must establish a fresh turn.
+							phase: applyPhase === "mid_turn" ? "mid_turn" : "standalone_turn",
+						}
+					: undefined;
 				return await this.#commitAutoCompactionResult({
 					summary: armedSpec.result.summary,
 					shortSummary: armedSpec.result.shortSummary,
@@ -2843,7 +2860,7 @@ export class SessionMaintenance {
 					details: armedSpec.result.details,
 					preserveData: armedSpec.result.preserveData,
 					fromExtension: false,
-					codexCompaction: armedSpec.codexCompaction,
+					codexCompaction,
 					method: armedSpec.method,
 					action,
 					reason,
@@ -3254,9 +3271,7 @@ export class SessionMaintenance {
 				codexCompaction = createCodexCompactionContext({
 					trigger: "auto",
 					reason: "context_limit",
-					phase:
-						options.phase ??
-						(reason === "threshold" ? "pre_turn" : reason === "idle" ? "standalone_turn" : "mid_turn"),
+					phase: resolveCodexCompactionPhase(reason, options.phase),
 				});
 
 				for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
