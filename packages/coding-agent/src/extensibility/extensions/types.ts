@@ -671,6 +671,8 @@ export interface ToolSessionEvent {
 export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = unknown> {
 	/** Tool name (used in LLM tool calls) */
 	name: string;
+	/** Optional provider-facing alias while retaining `name` for internal dispatch. */
+	customWireName?: string;
 	/** Human-readable label for UI */
 	label: string;
 	/** Description for LLM */
@@ -680,8 +682,11 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 	/** If true, tool is excluded unless explicitly listed in --tools or agent's tools field */
 	hidden?: boolean;
 	/** If true, tool is registered but not auto-included in the initial active set.
-	 *  The registering extension is responsible for activating/deactivating it via setActiveTools(). */
+	 *  The registering extension is responsible for activation via setActiveTools(). */
 	defaultInactive?: boolean;
+	/** If true, a default-inactive replacement inherits the activation of the native
+	 *  built-in it shadows. Explicit tool lists remain authoritative. */
+	inheritBuiltInActivation?: boolean;
 	/** How this tool is presented when enabled. See {@link ToolLoadMode}. Extension tools default to `"discoverable"`; set `"essential"` to stay top-level. */
 	loadMode?: ToolLoadMode;
 	/** If true, tool may stage deferred changes that require explicit resolve/discard. */

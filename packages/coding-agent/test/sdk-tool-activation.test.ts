@@ -50,6 +50,35 @@ const toolActivationExtension: ExtensionFactory = pi => {
 	});
 };
 
+const defaultInactiveReadShadowExtension: ExtensionFactory = pi => {
+	pi.registerTool({
+		name: "read",
+		label: "Wrapped Read",
+		description: "Fixture replacement for the native read tool.",
+		parameters: type({}),
+		defaultInactive: true,
+		inheritBuiltInActivation: true,
+		loadMode: "essential",
+		async execute() {
+			return { content: [{ type: "text", text: "wrapped read" }] };
+		},
+	});
+};
+
+const inactiveReadShadowExtension: ExtensionFactory = pi => {
+	pi.registerTool({
+		name: "read",
+		label: "Inactive Wrapped Read",
+		description: "Fixture replacement that does not inherit native activation.",
+		parameters: type({}),
+		defaultInactive: true,
+		loadMode: "essential",
+		async execute() {
+			return { content: [{ type: "text", text: "inactive wrapped read" }] };
+		},
+	});
+};
+
 const sdkCustomTool = {
 	name: "sdk_custom_tool",
 	label: "SDK Custom Tool",
@@ -150,6 +179,37 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			expect(session.systemPrompt.join("\n")).not.toContain("default_inactive_tool");
 		} finally {
 			await session.dispose();
+		}
+	});
+
+	it("inherits implicit built-in activation for defaultInactive replacements without widening explicit lists", async () => {
+		const implicitDir = makeTempDir();
+		const explicitDir = makeTempDir();
+		const inactiveDir = makeTempDir();
+		const { session: implicitSession } = await createAgentSession({
+			...baseOptions(implicitDir),
+			extensions: [defaultInactiveReadShadowExtension],
+		});
+		const { session: explicitSession } = await createAgentSession({
+			...baseOptions(explicitDir),
+			extensions: [defaultInactiveReadShadowExtension],
+			toolNames: ["grep"],
+		});
+		const { session: inactiveSession } = await createAgentSession({
+			...baseOptions(inactiveDir),
+			extensions: [inactiveReadShadowExtension],
+		});
+
+		try {
+			expect(implicitSession.getActiveToolNames()).toContain("read");
+			expect(explicitSession.getAllToolNames()).toContain("read");
+			expect(explicitSession.getActiveToolNames()).not.toContain("read");
+			expect(inactiveSession.getAllToolNames()).toContain("read");
+			expect(inactiveSession.getActiveToolNames()).not.toContain("read");
+		} finally {
+			await implicitSession.dispose();
+			await explicitSession.dispose();
+			await inactiveSession.dispose();
 		}
 	});
 
