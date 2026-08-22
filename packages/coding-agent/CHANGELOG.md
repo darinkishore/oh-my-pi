@@ -616,6 +616,10 @@
 - Pasted images and large text pastes appear in the composer as compact icon tokens instead of bracketed markers; the bracketed form remains the outgoing/stored format, and the transcript renders it back as the compact chip.
 - Deleting an attachment's inline token now removes the attachment from the submission (surviving image markers are renumbered).
 - Restored prompts (esc-esc, `/tree`, branch, queued-message dequeue, failed-submit recovery) collapse image markers back into clickable atomic chip tokens and re-materialize their file links instead of degrading to dead text.
+### Fixed
+
+- Provisional local patch: fixed an armed speculative compaction clearing Codex sticky turn state when its result was committed during a live tool loop ([#9277](https://github.com/can1357/oh-my-pi/issues/9277)).
+- Extension wrappers can opt into inheriting the activation of a native built-in they replace while explicit subagent tool lists remain authoritative; `ToolDefinition` also declares the already-supported `customWireName` provider alias.
 
 ## [17.4.1] - 2026-08-21
 
