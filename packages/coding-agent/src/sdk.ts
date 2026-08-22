@@ -2779,7 +2779,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					evalSession.getEvalSessionId = () => evalOptions.sessionId ?? null;
 				}
 				if (evalOptions.resolveTool) {
-					evalSession.getToolByName = name => evalOptions.resolveTool?.(name) as AgentTool | undefined;
+					const resolveEvalTool = (name: string) => evalOptions.resolveTool?.(name) as AgentTool | undefined;
+					evalSession.getToolByName = resolveEvalTool;
+					evalSession.getToolForEvalBridge = resolveEvalTool;
 				}
 				const evalTool = new EvalTool(evalSession);
 				return await evalTool.execute(
