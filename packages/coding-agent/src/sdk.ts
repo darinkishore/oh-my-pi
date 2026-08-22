@@ -3042,6 +3042,22 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		const defaultInactiveToolNames = new Set(
 			registeredTools.filter(tool => tool.definition.defaultInactive).map(tool => tool.definition.name),
 		);
+		// A default-inactive extension may deliberately shadow a native built-in so
+		// it can wrap that implementation through same-tool `ctx.invokeTool`. Inherit
+		// the native tool's implicit activation in an unrestricted session; otherwise
+		// the replacement silently removes a built-in that was active before extension
+		// registration. Explicit `toolNames` remain authoritative for subagents and
+		// other restricted profiles.
+		const implicitlyActiveBuiltInShadowNames = new Set(
+			registeredTools
+				.filter(
+					tool =>
+						tool.definition.defaultInactive &&
+						tool.definition.inheritBuiltInActivation &&
+						builtInToolNames.includes(tool.definition.name),
+				)
+				.map(tool => tool.definition.name),
+		);
 		const requestedActiveToolNames = normalizedRequested.filter(name => name !== "goal");
 		const explicitlyRequestedToolNameSet = explicitlyRequestedToolNames
 			? new Set(explicitlyRequestedToolNames)
@@ -3054,7 +3070,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			(explicitlyRequestedToolNameSet === undefined || explicitlyRequestedToolNameSet.has("write"));
 		const initialRequestedActiveToolNames = options.toolNames
 			? requestedActiveToolNames
-			: requestedActiveToolNames.filter(name => !defaultInactiveToolNames.has(name));
+			: requestedActiveToolNames.filter(
+					name => !defaultInactiveToolNames.has(name) || implicitlyActiveBuiltInShadowNames.has(name),
+				);
 		let initialToolNames = [...initialRequestedActiveToolNames];
 
 		// Custom tools and extension-registered tools are always included regardless of toolNames filter.
