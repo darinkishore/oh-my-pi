@@ -29,7 +29,7 @@ import { execCommand } from "../../exec/exec";
 import * as PiCodingAgent from "../../index";
 import type { CustomMessagePayload } from "../../session/messages";
 import type { FileDeleteFallbackHandler, FileWriteFallbackHandler } from "../../tools/file-write-fallback";
-import { EventBus } from "../../utils/event-bus";
+import { EventBus, ScopedEventBus } from "../../utils/event-bus";
 import * as TypeBox from "../legacy-typebox";
 import { installLegacyPiSpecifierShim, loadLegacyPiModule } from "../plugins/legacy-pi-compat";
 import { getAllPluginExtensionPaths } from "../plugins/loader";
@@ -162,14 +162,21 @@ class ConcreteExtensionAPI implements ExtensionAPI, IExtensionRuntime {
 		config: ProviderConfig;
 		sourceId: string;
 	}> = [];
+	readonly events: EventBus;
 
 	constructor(
 		public readonly pi: typeof PiCodingAgent,
 		private readonly extension: Extension,
 		private readonly runtime: IExtensionRuntime,
 		private readonly cwd: string,
-		public readonly events: EventBus,
-	) {}
+		eventBus: EventBus,
+		activateEventSubscriptions: boolean,
+	) {
+		const scopedEventBus = new ScopedEventBus(eventBus, extension.busDisposers, activateEventSubscriptions);
+		this.events = scopedEventBus;
+		extension.activateEventSubscriptions = () => scopedEventBus.activate();
+		extension.disposeEventSubscriptions = () => scopedEventBus.clear();
+	}
 
 	on<F extends HandlerFn>(event: string, handler: F): void {
 		const list = this.extension.handlers.get(event) ?? [];
@@ -198,6 +205,7 @@ class ConcreteExtensionAPI implements ExtensionAPI, IExtensionRuntime {
 		name: string,
 		options: {
 			description?: string;
+			modelInvocable?: RegisteredCommand["modelInvocable"];
 			getArgumentCompletions?: RegisteredCommand["getArgumentCompletions"];
 			handler: RegisteredCommand["handler"];
 		},
@@ -224,7 +232,7 @@ class ConcreteExtensionAPI implements ExtensionAPI, IExtensionRuntime {
 		options: { description?: string; type: "boolean" | "string"; default?: boolean | string },
 	): void {
 		this.extension.flags.set(name, { name, extensionPath: this.extension.path, ...options });
-		if (options.default !== undefined) {
+		if (options.default !== undefined && !this.runtime.flagValues.has(name)) {
 			this.runtime.flagValues.set(name, options.default);
 		}
 	}
@@ -352,6 +360,9 @@ function createExtension(extensionPath: string, resolvedPath: string): Extension
 		commands: new Map(),
 		flags: new Map(),
 		shortcuts: new Map(),
+		busDisposers: [],
+		activateEventSubscriptions: () => undefined,
+		disposeEventSubscriptions: () => undefined,
 	};
 }
 
@@ -393,7 +404,6 @@ async function importExtensionModule(extensionPath: string, cwd: string): Promis
 				error: `Extension does not export a valid factory function: ${extensionPath}`,
 			};
 		}
-
 		return { path: extensionPath, factory, resolvedPath, error: null };
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -407,18 +417,28 @@ async function bindExtension(
 	cwd: string,
 	eventBus: EventBus,
 	runtime: IExtensionRuntime,
+	activateEventSubscriptions: boolean,
 ): Promise<{ extension: Extension | null; error: string | null }> {
 	const factory = imported.factory;
 	if (imported.error !== null || factory === null) {
 		return { extension: null, error: imported.error };
 	}
+	let extension: Extension | undefined;
 	try {
-		const extension = createExtension(extensionPath, imported.resolvedPath);
-		const api = new ConcreteExtensionAPI(PiCodingAgent, extension, runtime, cwd, eventBus);
+		extension = createExtension(extensionPath, imported.resolvedPath);
+		const api = new ConcreteExtensionAPI(
+			PiCodingAgent,
+			extension,
+			runtime,
+			cwd,
+			eventBus,
+			activateEventSubscriptions,
+		);
 		await withHostGuard(() => runExtensionFactory(factory, api, runtime));
 
 		return { extension, error: null };
 	} catch (err) {
+		extension?.disposeEventSubscriptions();
 		const message = err instanceof Error ? err.message : String(err);
 		return { extension: null, error: `Failed to load extension: ${message}` };
 	}
@@ -433,11 +453,23 @@ export async function loadExtensionFromFactory(
 	eventBus: EventBus,
 	runtime: IExtensionRuntime,
 	name = "<inline>",
+	activateEventSubscriptions = true,
 ): Promise<Extension> {
 	const extension = createExtension(name, name);
-	const api = new ConcreteExtensionAPI(PiCodingAgent, extension, runtime, cwd, eventBus);
-	await runExtensionFactory(factory, api, runtime);
-	return extension;
+	const api = new ConcreteExtensionAPI(PiCodingAgent, extension, runtime, cwd, eventBus, activateEventSubscriptions);
+	try {
+		await runExtensionFactory(factory, api, runtime);
+		return extension;
+	} catch (error) {
+		extension.disposeEventSubscriptions();
+		throw error;
+	}
+}
+
+export interface LoadExtensionsOptions {
+	runtime?: IExtensionRuntime;
+	/** Keep shared-bus subscriptions dormant until the fresh graph commits. */
+	stageEventSubscriptions?: boolean;
 }
 
 /**
@@ -448,9 +480,14 @@ export async function loadExtensionFromFactory(
  * sequentially in the original path order, so registration semantics
  * (last-wins collisions, shared runtime flag defaults) stay deterministic.
  */
-export async function loadExtensions(paths: string[], cwd: string, eventBus?: EventBus): Promise<LoadExtensionsResult> {
+export async function loadExtensions(
+	paths: string[],
+	cwd: string,
+	eventBus?: EventBus,
+	options?: LoadExtensionsOptions,
+): Promise<LoadExtensionsResult> {
 	const preparedExtensions = await Promise.all(paths.map(extPath => importExtensionModule(extPath, cwd)));
-	return bindPreparedExtensions(preparedExtensions, cwd, eventBus);
+	return bindPreparedExtensions(preparedExtensions, cwd, eventBus, options);
 }
 
 /** Bind previously imported extension factories to a fresh session runtime. */
@@ -458,14 +495,23 @@ export async function bindPreparedExtensions(
 	preparedExtensions: readonly PreparedExtension[],
 	cwd: string,
 	eventBus?: EventBus,
+	options?: LoadExtensionsOptions,
 ): Promise<LoadExtensionsResult> {
 	const extensions: Extension[] = [];
 	const errors: Array<{ path: string; error: string }> = [];
 	const resolvedEventBus = eventBus ?? new EventBus();
-	const runtime = new ExtensionRuntime();
+	const resolvedRuntime = options?.runtime ?? new ExtensionRuntime();
+	const activateEventSubscriptions = options?.stageEventSubscriptions !== true;
 
 	for (const prepared of preparedExtensions) {
-		const { extension, error } = await bindExtension(prepared.path, prepared, cwd, resolvedEventBus, runtime);
+		const { extension, error } = await bindExtension(
+			prepared.path,
+			prepared,
+			cwd,
+			resolvedEventBus,
+			resolvedRuntime,
+			activateEventSubscriptions,
+		);
 
 		if (error) {
 			errors.push({ path: prepared.path, error });
@@ -480,7 +526,7 @@ export async function bindPreparedExtensions(
 	return {
 		extensions,
 		errors,
-		runtime,
+		runtime: resolvedRuntime,
 		preparedExtensions: [...preparedExtensions],
 	};
 }
