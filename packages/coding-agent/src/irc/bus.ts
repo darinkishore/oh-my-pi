@@ -156,6 +156,20 @@ export class IrcBus {
 	): Promise<IrcDeliveryReceipt> {
 		const ref = this.#registry.get(message.to);
 		if (!ref) {
+			const orphanWaiter = this.#takeMatchingWaiter(message.to, message.from);
+			if (orphanWaiter) {
+				orphanWaiter.resolve(message);
+				if (!opts?.suppressRelay) this.#relayToMainUi(message);
+				return { to: message.to, outcome: "injected" };
+			}
+			if (message.to === MAIN_AGENT_ID) {
+				this.#enqueue(message);
+				return {
+					to: message.to,
+					outcome: "failed",
+					error: `Agent "${message.to}" is not currently addressable; message buffered for its next wait/inbox.`,
+				};
+			}
 			return {
 				to: message.to,
 				outcome: "failed",
@@ -223,7 +237,12 @@ export class IrcBus {
 
 		const session = this.#registry.get(message.to)?.session;
 		if (!session) {
-			return { to: message.to, outcome: "failed", error: `Agent "${message.to}" has no live session.` };
+			this.#enqueue(message);
+			return {
+				to: message.to,
+				outcome: "failed",
+				error: `Agent "${message.to}" has no live session; message buffered for its next wait/inbox.`,
+			};
 		}
 
 		try {

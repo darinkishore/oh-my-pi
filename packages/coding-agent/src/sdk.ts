@@ -61,6 +61,7 @@ import {
 } from "./capability/rule";
 import { bucketRules } from "./capability/rule-buckets";
 import type { EffectiveExtensionRoots } from "./capability/types";
+import { createCommandBridgeExtension } from "./command-bridge";
 import { shouldEnableAppendOnlyContext } from "./config/append-only-context-mode";
 import { shouldInlineToolDescriptors } from "./config/inline-tool-descriptors-mode";
 import { isAuthenticated, kNoAuth, ModelRegistry } from "./config/model-registry";
@@ -86,7 +87,7 @@ import { createBridgeEditTool, createBridgeGrepFactory } from "./cursor-bridge-t
 import "./discovery";
 import { createImageUrlServiceFromSettings } from "./blob-broker/service";
 import { wrapStreamFnWithBlobUrlFallback } from "./blob-broker/stream-fallback";
-import { initializeWithSettings } from "./discovery";
+import { initializeWithSettings, reset as resetDiscoveryFsCache } from "./discovery";
 import { setInvocationConfiguredExtensions, withOmpExtensionRootScope } from "./discovery/omp-extension-roots";
 import { disposeVmContextsByOwner } from "./eval/js/context-manager";
 import { getEnabledEvalPreludes, type EvalPreludeDefinition } from "./eval/preludes";
@@ -108,6 +109,8 @@ import {
 	type ExtensionContext,
 	type ExtensionFactory,
 	ExtensionRunner,
+	type ExtensionsReloadOptions,
+	type ExtensionsReloadReport,
 	ExtensionToolWrapper,
 	type ExtensionUIContext,
 	type LoadExtensionsResult,
@@ -118,6 +121,7 @@ import {
 	type ToolDefinition,
 	wrapRegisteredTools,
 } from "./extensibility/extensions";
+import { bumpExtensionGraphGeneration } from "./extensibility/plugins/legacy-pi-compat";
 import {
 	loadSkills as loadSkillsInternal,
 	type Skill,
@@ -1302,6 +1306,18 @@ export function createAutoLearnCaptureRunner(
  * });
  * ```
  */
+export function shouldDisposeGlobalLifecycle(
+	agentKind: "main" | "sub",
+	agentRegistry: AgentRegistry,
+	agentId: string,
+	registeredRef: AgentRef | undefined,
+): boolean {
+	if (agentKind !== "main") {
+		return false;
+	}
+	return registeredRef === undefined || agentRegistry.get(agentId) === registeredRef;
+}
+
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
 	const extensionRoots = options.extensionRoots?.();
 	const explicit = extensionRoots?.explicit ?? options.additionalExtensionPaths ?? [];
@@ -2131,6 +2147,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 
 			inlineExtensions.push(...(options.extensions ?? []));
 			inlineExtensions.push(createAutoresearchExtension);
+			inlineExtensions.push(createCommandBridgeExtension);
 			if (customTools.length > 0) {
 				inlineExtensions.push(createCustomToolsExtension(customTools, customToolSourcePaths));
 			}
@@ -3607,7 +3624,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					logger.info("recovered inline sloppy edit payload into edit tool call", { regions: recovered });
 				}
 			},
-			resolveFallbackTool: resolveDeviceTool,
+			resolveFallbackTool: name =>
+				(hasSession ? session.getDeferredExtensionToolByName(name) : undefined) ?? resolveDeviceTool(name),
 			intentTracing: !!intentField,
 			pruneToolDescriptions: inlineToolDescriptors,
 			dialect: resolveDialect(settings.get("tools.format"), model),
@@ -3995,7 +4013,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					// begins — the lifecycle await below opens an async gap before
 					// AgentSession.dispose() would otherwise set its guards.
 					session.beginDispose();
-					if (agentKind === "main") {
+					if (shouldDisposeGlobalLifecycle(agentKind, agentRegistry, resolvedAgentId, registeredAgentRef)) {
 						// Top-level teardown owns the global agent lifecycle: park timers,
 						// adopted subagent sessions, revivers. Tear it down while shared
 						// resources (kernels, MCP, LSP) are still live. Subagent disposal
@@ -4028,6 +4046,125 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				}
 			};
 		}
+
+		const abortedReloadReport = (errors: ExtensionsReloadReport["errors"]): ExtensionsReloadReport => ({
+			refreshed: [],
+			descriptionFrozen: [],
+			versioned: [],
+			added: [],
+			removed: [],
+			cacheClean: true,
+			toolAnnouncements: [],
+			errors,
+			aborted: true,
+		});
+		const performSessionExtensionsReload = async (
+			reloadOptions?: ExtensionsReloadOptions,
+		): Promise<ExtensionsReloadReport> => {
+			let paths: string[];
+			if (options.preloadedExtensionPaths) {
+				paths = options.preloadedExtensionPaths;
+			} else {
+				resetDiscoveryFsCache();
+				paths = await discoverSessionExtensionPaths(options, cwd, settings);
+			}
+
+			bumpExtensionGraphGeneration();
+			const previousExtensionToolNames = extensionRunner
+				.getAllRegisteredTools()
+				.map(registered => registered.definition.name);
+			const previousFlagValues = new Map(extensionsResult.runtime.flagValues);
+			const freshResult = await loadExtensions(paths, cwd, eventBus, {
+				runtime: extensionsResult.runtime,
+				stageEventSubscriptions: true,
+			});
+			for (let index = 0; index < inlineExtensions.length; index += 1) {
+				const factory = inlineExtensions[index];
+				if (!factory) {
+					continue;
+				}
+				try {
+					const extension = await loadExtensionFromFactory(
+						factory,
+						cwd,
+						eventBus,
+						extensionsResult.runtime,
+						`<inline-${index}>`,
+						false,
+					);
+					freshResult.extensions.push(extension);
+				} catch (error) {
+					freshResult.errors.push({
+						path: `<inline-${index}>`,
+						error: error instanceof Error ? error.message : String(error),
+					});
+				}
+			}
+
+			if (freshResult.errors.length > 0) {
+				ExtensionRunner.disposeExtensions(freshResult.extensions);
+				extensionsResult.runtime.pendingProviderRegistrations = [];
+				extensionsResult.runtime.flagValues.clear();
+				for (const [name, value] of previousFlagValues) {
+					extensionsResult.runtime.flagValues.set(name, value);
+				}
+				return abortedReloadReport(freshResult.errors);
+			}
+
+			const registeredFreshTools = freshResult.extensions.flatMap(extension => [...extension.tools.values()]);
+			const freshWrappedTools: AgentTool[] = wrapRegisteredTools(registeredFreshTools, extensionRunner)
+				.map(wrapToolWithMetaNotice)
+				.map(tool => new ExtensionToolWrapper(tool, extensionRunner) as AgentTool);
+			let report: ExtensionsReloadReport;
+			try {
+				report = await session.applyExtensionsReload(previousExtensionToolNames, freshWrappedTools, reloadOptions);
+			} catch (error) {
+				ExtensionRunner.disposeExtensions(freshResult.extensions);
+				extensionsResult.runtime.pendingProviderRegistrations = [];
+				extensionsResult.runtime.flagValues.clear();
+				for (const [name, value] of previousFlagValues) {
+					extensionsResult.runtime.flagValues.set(name, value);
+				}
+				return abortedReloadReport([
+					{
+						path: "<session-tool-registry>",
+						error: error instanceof Error ? error.message : String(error),
+					},
+				]);
+			}
+
+			extensionRunner.replaceExtensions(freshResult.extensions);
+			const sources = freshResult.extensions.map(extension => extension.path);
+			const providerRegistrations = extensionsResult.runtime.pendingProviderRegistrations.splice(0);
+			try {
+				modelRegistry.syncExtensionSources(sources);
+				for (const sourceId of new Set(sources)) {
+					modelRegistry.clearSourceRegistrations(sourceId);
+				}
+				for (const { name, config, sourceId } of providerRegistrations) {
+					modelRegistry.registerProvider(name, config, sourceId);
+				}
+				await modelRegistry.refreshRuntimeProviders("offline");
+				void modelRegistry.refreshRuntimeProviders().catch(error => {
+					logger.warn("runtime provider discovery failed after extension reload", {
+						error: error instanceof Error ? error.message : String(error),
+					});
+				});
+			} catch (error) {
+				report.errors.push({
+					path: "<provider-registry>",
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+			return report;
+		};
+		let reloadChain: Promise<unknown> = Promise.resolve();
+		const reloadSessionExtensions = (reloadOptions?: ExtensionsReloadOptions): Promise<ExtensionsReloadReport> => {
+			const next = reloadChain.catch(() => undefined).then(() => performSessionExtensionsReload(reloadOptions));
+			reloadChain = next;
+			return next;
+		};
+		extensionRunner.setExtensionsReloader(reloadSessionExtensions);
 
 		if (model?.api === "openai-codex-responses") {
 			// `.api` equality doesn't narrow the generic; the guard makes this cast sound.
