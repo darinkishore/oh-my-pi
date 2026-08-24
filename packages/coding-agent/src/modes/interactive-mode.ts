@@ -922,6 +922,9 @@ export class InteractiveMode implements InteractiveModeContext {
 	#baseAutocompleteProvider: AutocompleteProvider | undefined;
 	/** Extension-registered provider factories, applied in registration order (#4919). */
 	#autocompleteProviderFactories: AutocompleteProviderFactory[] = [];
+	/** Extension commands rebuilt from the committed live graph after reloads. */
+	#extensionSlashCommands: SlashCommand[] = [];
+	#extensionsReloadUnsubscribe?: () => void;
 	#cleanupUnsubscribe?: () => void;
 	#signalTeardown?: SessionTeardown;
 	readonly #version: string;
@@ -1308,14 +1311,13 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.hideThinkingBlock = settings.get("hideThinkingBlock");
 		this.proseOnlyThinking = settings.get("proseOnlyThinking");
 
-		const hookCommands: SlashCommand[] = (
-			this.session.extensionRunner?.getRegisteredCommands(BUILTIN_SLASH_COMMAND_RESERVED_NAMES) ?? []
-		).map(cmd => ({
-			name: cmd.name,
-			description: cmd.description ?? "(hook command)",
-			icon: getSlashCommandTypeIcon("extension"),
-			getArgumentCompletions: cmd.getArgumentCompletions,
-		}));
+		this.#extensionSlashCommands = this.#buildExtensionSlashCommands();
+		this.#extensionsReloadUnsubscribe = this.session.extensionRunner?.onExtensionsReloaded(() => {
+			this.#extensionSlashCommands = this.#buildExtensionSlashCommands();
+			this.refreshSlashCommandState().catch(error => {
+				logger.warn("Failed to refresh slash command state after extension reload", { error: String(error) });
+			});
+		});
 
 		// Convert custom commands (TypeScript) to SlashCommand format
 		const customCommands: SlashCommand[] = this.session.customCommands.map(loaded => ({
@@ -1331,7 +1333,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			icon: getSlashCommandTypeIcon(cmd.icon ?? "action"),
 		}));
 		// Store pending commands for init() where file commands are loaded async
-		this.#pendingSlashCommands = [...builtinCommands, ...hookCommands, ...customCommands, ...skillCommandList];
+		this.#pendingSlashCommands = [...builtinCommands, ...customCommands, ...skillCommandList];
 
 		this.#uiHelpers = new UiHelpers(this);
 		this.#btwController = new BtwController(this);
@@ -1827,6 +1829,17 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#pendingSlashCommands = [...retainedCommands, ...skillCommands];
 	}
 
+	#buildExtensionSlashCommands(): SlashCommand[] {
+		return (this.session.extensionRunner?.getRegisteredCommands(BUILTIN_SLASH_COMMAND_RESERVED_NAMES) ?? []).map(
+			command => ({
+				name: command.name,
+				description: command.description ?? "(hook command)",
+				icon: getSlashCommandTypeIcon("extension"),
+				getArgumentCompletions: command.getArgumentCompletions,
+			}),
+		);
+	}
+
 	/** Reload slash commands and autocomplete for the provided working directory. */
 	async refreshSlashCommandState(cwd?: string, preloaded?: ReadonlyArray<FileSlashCommand>): Promise<void> {
 		const basePath = cwd ?? this.sessionManager.getCwd();
@@ -1856,7 +1869,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		// resolution order by skipping templates whose names already appear in any
 		// builtin/hook/custom/skill/file command token.
 		const reservedNames = new Set<string>();
-		for (const command of this.#pendingSlashCommands) {
+		for (const command of [...this.#pendingSlashCommands, ...this.#extensionSlashCommands]) {
 			reservedNames.add(command.name);
 			for (const alias of command.aliases ?? []) reservedNames.add(alias);
 		}
@@ -1874,7 +1887,12 @@ export class InteractiveMode implements InteractiveModeContext {
 				icon: promptIcon,
 			}));
 		this.#baseAutocompleteProvider = this.#inputController.createAutocompleteProvider(
-			[...this.#pendingSlashCommands, ...fileSlashCommands, ...promptTemplateCommands],
+			[
+				...this.#pendingSlashCommands,
+				...this.#extensionSlashCommands,
+				...fileSlashCommands,
+				...promptTemplateCommands,
+			],
 			basePath,
 		);
 		this.#applyAutocompleteProvider();
@@ -5494,6 +5512,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#observerRegistry.dispose();
 		this.#agentRegistryUnsubscribe?.();
 		this.#agentRegistryUnsubscribe = undefined;
+		this.#extensionsReloadUnsubscribe?.();
+		this.#extensionsReloadUnsubscribe = undefined;
 		this.#agentRegistrySubscriptionTarget = undefined;
 		this.#eventController.dispose();
 		this.#codexResetFireworksController.dispose();
