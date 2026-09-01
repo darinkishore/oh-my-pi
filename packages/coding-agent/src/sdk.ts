@@ -3423,8 +3423,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				initialToolNames.some(name => toolRegistry.get(name)?.deferrable === true) ||
 				toolSession.getPlanModeState?.()?.enabled === true ||
 				toolSession.xdev.catalog.size > 0;
-			const writeTransportAvailable =
-				!transportNeeded || (xdevWriteAvailable && (await ensureWriteRegistered()));
+			const writeTransportAvailable = !transportNeeded || (xdevWriteAvailable && (await ensureWriteRegistered()));
 			if (writeTransportAvailable) {
 				setXdevMountedNames(toolSession.xdev, mountedNames);
 				initialToolNames = topLevelToolNames;
@@ -3983,8 +3982,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 							? mounted
 							: [...mounted, name]
 						: mounted.filter(mountedName => mountedName !== name);
+					const nextEnabled = alreadyEnabled ? enabled : [...enabled, name];
 					await session.setActiveToolPresentation(
-						alreadyEnabled ? enabled : [...enabled, name],
+						shouldMount && !nextEnabled.includes("write") ? [...nextEnabled, "write"] : nextEnabled,
 						nextMounted,
 						existingTool !== undefined,
 						activationSignal,

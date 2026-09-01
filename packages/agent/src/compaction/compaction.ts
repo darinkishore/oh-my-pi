@@ -1518,21 +1518,6 @@ function selectNativeCompactionError(previousError: unknown, nextError: unknown)
 }
 
 /**
- * User-facing placeholder summary for a provider-native remote compaction.
- *
- * `inputTokens` is the compaction request's provider-reported input usage
- * (persisted as `openaiRemoteCompaction.usedTokens`), NOT the size of the
- * retained replacement history — so the wording describes processed input, not
- * retained context, to avoid implying the number is the post-compaction size.
- */
-function formatRemoteCompactionSummary(inputTokens: number): string {
-	return (
-		"Remote compaction preserved provider-native history for this session." +
-		(inputTokens > 0 ? ` Compaction processed ${inputTokens} input tokens.` : "")
-	);
-}
-
-/**
  * Generate summaries for compaction using prepared data.
  * Returns CompactionResult - SessionManager adds id/parentId when saving.
  *
