@@ -347,9 +347,7 @@ async function attemptCompactionV2Streaming(
 		...(request.reasoning || options.responsesLite
 			? {
 					// Lite implies gpt-5.4+, where codex-rs sends `all_turns` replay.
-					reasoning: options.responsesLite
-						? { ...(request.reasoning ?? {}), context: "all_turns" }
-						: request.reasoning,
+					reasoning: options.responsesLite ? { ...request.reasoning, context: "all_turns" } : request.reasoning,
 					include: ["reasoning.encrypted_content"],
 				}
 			: {}),
