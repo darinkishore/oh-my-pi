@@ -241,6 +241,7 @@ describe("generate_image tool gating", () => {
 		expect(mcpCalls).toBe(1);
 	});
 
+
 	it("keeps transport-only write across enabled-set round trips", async () => {
 		const session = await sessionWithCustomTools(["read"], []);
 		await session.refreshMCPTools([customTool("mcp__test__search", true)]);
@@ -253,7 +254,8 @@ describe("generate_image tool gating", () => {
 
 		await session.refreshMCPTools([]);
 		expect(session.getActiveToolNames()).toContain("write");
-		expect(session.getXdevToolEntries().map(entry => entry.name)).toContain("mcp__test__search");
+		expect(session.getXdevToolEntries().map(entry => entry.name)).not.toContain("mcp__test__search");
+		expect(session.systemPrompt.join("\n")).toContain("mcp__test__search");
 	});
 
 	it("preserves explicitly requested write after MCP devices disconnect", async () => {

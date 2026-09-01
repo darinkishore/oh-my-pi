@@ -3805,7 +3805,6 @@ function buildCodexChainedRequestBody(
 			);
 		}
 		resetCodexWebSocketAppendState(state);
-		state.turnState = undefined;
 		state.modelsEtag = undefined;
 		state.appendResetStreak = streak;
 	}
