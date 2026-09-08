@@ -3,6 +3,7 @@ import { MAIN_AGENT_ID } from "../registry/agent-registry";
 import type { ToolSession } from "../tools";
 import { ToolAbortError } from "../tools/tool-errors";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
+import type { EvalAgentResult } from "./agent-bridge";
 import { withBridgeTimeoutPause } from "./bridge-timeout";
 import { getCompletionHandle, type CompletionHandleEntry } from "./completion-bridge";
 import type { JsStatusEvent } from "./js/shared/types";
@@ -28,6 +29,8 @@ export interface EvalHandleSnapshot extends EvalHandleRef {
 	status: EvalHandleState;
 	text?: string;
 	data?: unknown;
+	model?: string | string[];
+	details?: EvalAgentResult["details"];
 	error?: string;
 }
 
@@ -102,6 +105,12 @@ function agentSnapshot(ref: EvalHandleRef, job: AsyncJob): EvalHandleSnapshot {
 	if (isUnknownRecord(evalResult)) {
 		if (typeof evalResult.text === "string") snapshot.text = evalResult.text;
 		if (Object.hasOwn(evalResult, "data")) snapshot.data = evalResult.data;
+		const details = isUnknownRecord(evalResult.details) ? evalResult.details : undefined;
+		if (details) snapshot.details = details as EvalAgentResult["details"];
+		const model = details?.model;
+		if (typeof model === "string" || (Array.isArray(model) && model.every(item => typeof item === "string"))) {
+			snapshot.model = model;
+		}
 	}
 	return snapshot;
 }
