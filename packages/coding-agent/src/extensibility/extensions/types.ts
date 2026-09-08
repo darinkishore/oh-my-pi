@@ -604,7 +604,7 @@ export interface ExtensionContext {
 }
 
 export interface ExtensionEvalParams {
-	language: "py" | "js" | "rb" | "jl";
+	language: "py" | "js";
 	code: string;
 	title?: string;
 	timeout?: number;
