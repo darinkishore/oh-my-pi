@@ -297,7 +297,7 @@ export async function requestCompactionV2Streaming(
 	const isCodexResponses = compactionV2Api(model) === "openai-codex-responses" || model.provider === "openai-codex";
 	const responsesLite =
 		model.api === "openai-codex-responses"
-			? resolveCodexResponsesLite(model as Model<"openai-codex-responses">, options?.responsesLite)
+			? resolveCodexResponsesLite(options?.responsesLite ?? model.useResponsesLite)
 			: false;
 	const codexMetadata =
 		isCodexResponses && !shouldUseCodexProviderTransport(model)
