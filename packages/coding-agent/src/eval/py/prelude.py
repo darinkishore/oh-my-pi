@@ -696,13 +696,17 @@ if "__omp_prelude_loaded__" not in globals():
     class AgentHandle(_Handle):
         """Background subagent handle returned by ``agent()``."""
 
-        __slots__ = ("agent", "handle")
+        __slots__ = ("agent", "handle", "model", "text", "data", "details")
         kind = "agent"
 
         def __init__(self, id, agent, schema=None):
             super().__init__(id, schema)
             self.agent = agent
             self.handle = f"agent://{id}"
+            self.model = None
+            self.text = None
+            self.data = None
+            self.details = None
 
         def __repr__(self):
             return f"<agent {self.id} ({self.agent})>"
@@ -741,6 +745,13 @@ if "__omp_prelude_loaded__" not in globals():
                 else f"{handle.kind} handle {handle.id} failed"
             )
             raise RuntimeError(message or f"{handle.kind} handle {handle.id} failed")
+        if isinstance(handle, AgentHandle) and isinstance(snapshot, dict):
+            handle.text = snapshot.get("text", "")
+            handle.details = snapshot.get("details")
+            if "data" in snapshot:
+                handle.data = snapshot["data"]
+            if "model" in snapshot:
+                handle.model = snapshot["model"]
         if isinstance(snapshot, dict) and "data" in snapshot:
             value = snapshot["data"]
         else:

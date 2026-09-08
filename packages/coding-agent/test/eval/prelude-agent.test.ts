@@ -76,20 +76,52 @@ describe("eval js agent() handle", () => {
 	});
 
 	it("parses wait() text as JSON only when a schema was given", async () => {
+		let waitCount = 0;
 		const sandbox = loadPrelude(async name => {
 			if (name === "__agent__") return { id: "id-9", agent: "task" };
-			if (name === "__wait__") return { items: [{ status: "completed", text: '{"k":1}' }] };
+			if (name === "__wait__") {
+				waitCount += 1;
+				return {
+					items: [
+						{
+							status: "completed",
+							text: '{"k":1}',
+							...(waitCount === 1 ? { data: { k: 1 } } : {}),
+							model: "p/model",
+							details: { agent: "task", id: "id-9", model: "p/model", structured: true },
+						},
+					],
+				};
+			}
 			throw new Error(`unexpected bridge call ${name}`);
 		});
 		const withSchema = (await (sandbox.agent as AgentHelper)("emit", {
 			schema: { type: "object" },
-		})) as { wait(): Promise<unknown> };
+		})) as {
+			text?: string;
+			data?: unknown;
+			details?: unknown;
+			model?: string;
+			wait(): Promise<unknown>;
+		};
+		expect(withSchema.model).toBeUndefined();
 		expect(await withSchema.wait()).toEqual({ k: 1 });
+		expect(withSchema.text).toBe('{"k":1}');
+		expect(withSchema.data).toEqual({ k: 1 });
+		expect(withSchema.details).toEqual({
+			agent: "task",
+			id: "id-9",
+			model: "p/model",
+			structured: true,
+		});
+		expect(withSchema.model).toBe("p/model");
 
 		const plain = (await (sandbox.agent as AgentHelper)("emit")) as {
+			model?: string;
 			wait(): Promise<unknown>;
 		};
 		expect(await plain.wait()).toBe('{"k":1}');
+		expect(plain.model).toBe("p/model");
 	});
 });
 

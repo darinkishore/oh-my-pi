@@ -507,6 +507,32 @@ describe("runEvalAgent", () => {
 		await expect(runEvalAgentAndWait({ prompt: "fail" }, { session: makeSession() })).rejects.toThrow("boom");
 	});
 
+	it("surfaces the resolved model through the completed handle snapshot", async () => {
+		mockAgents();
+		vi.spyOn(taskExecutor, "runSubprocess").mockImplementationOnce(async options =>
+			singleResult(options, {
+				id: "0-EvalAgent",
+				output: "done",
+				resolvedModel: "p/model",
+			}),
+		);
+		const session = makeSession();
+		const handle = await runEvalAgent({ prompt: "hello" }, { session });
+		const waited = await runEvalWait({ items: [{ kind: "agent", id: handle.id }] }, { session });
+
+		expect(waited.items[0]).toMatchObject({
+			status: "completed",
+			text: "done",
+			model: "p/model",
+			details: {
+				agent: "task",
+				id: "0-EvalAgent",
+				model: "p/model",
+				structured: false,
+			},
+		});
+	});
+
 	// Regression: a runtime-limit abort returns exitCode=1, stderr="", error=undefined,
 	// aborted=true, abortReason="Subagent runtime limit exceeded (...)". The previous
 	// failure-message coalesce stopped at the empty `stderr` (since `??` only skips

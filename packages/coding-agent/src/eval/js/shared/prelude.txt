@@ -155,6 +155,8 @@ if (!globalThis.__omp_js_prelude_loaded__) {
 			super("agent", id, schema);
 			this.agent = agentName;
 			this.handle = `agent://${id}`;
+			this.text = undefined;
+			this.details = undefined;
 		}
 
 		toString() {
@@ -190,6 +192,12 @@ if (!globalThis.__omp_js_prelude_loaded__) {
 		if (status === "running") throw timeoutError(`${handle.kind} handle ${handle.id} is still running`);
 		if (status === "failed" || status === "cancelled") {
 			throw new Error(snapshot?.error || `${handle.kind} handle ${handle.id} failed`);
+		}
+		if (handle instanceof AgentHandle) {
+			handle.text = snapshot?.text ?? "";
+			handle.details = snapshot?.details;
+			if (hasOwn(snapshot ?? {}, "data")) handle.data = snapshot.data;
+			if (hasOwn(snapshot ?? {}, "model")) handle.model = snapshot.model;
 		}
 		const value = hasOwn(snapshot ?? {}, "data")
 			? snapshot.data

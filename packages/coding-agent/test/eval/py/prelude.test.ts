@@ -115,6 +115,64 @@ describe("python prelude", () => {
 		}
 	});
 
+	it("attaches the resolved model after an agent handle settles", async () => {
+		const server = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			fetch: async request => {
+				const body = (await request.json()) as { name?: string };
+				if (body.name === "__agent__") {
+					return Response.json({ ok: true, value: { id: "id-9", agent: "task" } });
+				}
+				if (body.name === "__wait__") {
+					return Response.json({
+						ok: true,
+						value: {
+							items: [
+								{
+									status: "completed",
+									text: "done",
+									data: { ok: true },
+									model: "p/model",
+									details: { agent: "task", id: "id-9", model: "p/model", structured: true },
+								},
+							],
+						},
+					});
+				}
+				return Response.json({ ok: false, error: `unexpected bridge call ${body.name}` });
+			},
+		});
+
+		try {
+			const result = await runPrelude(
+				[
+					'handle = agent("say hi")',
+					"print(handle.model)",
+					"print(handle.wait())",
+					"print(handle.model)",
+					"print(handle.text)",
+					"print(handle.data)",
+					"print(handle.details)",
+				].join("\n"),
+				{
+					PI_TOOL_BRIDGE_URL: server.url.toString(),
+					PI_TOOL_BRIDGE_TOKEN: "test-token",
+					PI_TOOL_BRIDGE_SESSION: "test-session",
+				},
+			);
+
+			expect(result).toEqual({
+				stdout:
+					"None\n{'ok': True}\np/model\ndone\n{'ok': True}\n{'agent': 'task', 'id': 'id-9', 'model': 'p/model', 'structured': True}\n",
+				stderr: "",
+				exitCode: 0,
+			});
+		} finally {
+			server.stop(true);
+		}
+	});
+
 	it("bypasses discovered proxies for loopback bridge calls", async () => {
 		let proxyRequests = 0;
 		const bridge = Bun.serve({

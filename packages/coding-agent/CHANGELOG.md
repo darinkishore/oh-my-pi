@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- Eval `agent()` handles expose the subagent's resolved model after `wait()`, so provider fallback or model substitution remains visible to the caller.
 - Fixed cache-clean extension reloads unmounting every dynamic `xd://` device, including extension, MCP, and RPC host tools.
 - Retired extension tool closures after incompatible schema reloads so disposed state cannot keep handling calls; stale names now direct the model to the versioned replacement.
 - Kept retired extension tool names as serializable own properties so `/reload-extensions` cannot make the next Codex request fail with a missing tool name.
