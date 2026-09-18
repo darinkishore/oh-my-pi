@@ -763,6 +763,10 @@
 
 - Added `compaction.remoteStrategy` so native Responses streaming compaction models can use context-full maintenance while other models retain the configured fallback strategy.
 
+### Changed
+
+- Replaced forced-completion prompt rules with collaborative guidance: address user interjections before continuing a plan, allow honest pauses with unfinished work, and require verification for claims of success rather than permission to stop. Todo tracking is discretionary unless requested, and clarification guidance distinguishes factual lookup from decisions that need the user's judgment.
+
 ### Fixed
 
 - Eval `agent()` handles expose the subagent's resolved model after `wait()`, so provider fallback or model substitution remains visible to the caller.

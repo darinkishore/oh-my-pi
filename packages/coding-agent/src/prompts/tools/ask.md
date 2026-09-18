@@ -1,7 +1,8 @@
 Ask user for clarification/input during task execution.
 
 <conditions>
-- Multiple approaches with significantly different tradeoffs user should weigh.
+- A decision, ambiguity, or change of scope needs the user's judgment.
+- Use ordinary conversation instead when a structured choice would get in the way.
 </conditions>
 
 <instruction>
@@ -17,7 +18,7 @@ Ask user for clarification/input during task execution.
 </caution>
 
 <critical>
-- Default to action. Resolve ambiguity via repo conventions, existing patterns, reasonable defaults. Exhaust existing sources (code, configs, docs, history) before asking. Ask only when options have materially different tradeoffs the user must decide.
-- If multiple choices acceptable: pick most conservative/standard option; proceed; state choice.
+- Look up readily available facts and follow established conventions for low-risk implementation details. You do not need to exhaust every source before asking about intent or a consequential choice.
+- When a safe, conventional default is sufficient, proceed and state material assumptions. When the choice affects the user's goals, ask rather than silently deciding.
 - Do NOT include "Other"; UI automatically adds "Other (type your own)" to every question.
 </critical>
