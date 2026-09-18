@@ -49,6 +49,9 @@ function extension(name: string, handler: (event: BeforeAgentStartEvent) => Prom
 		commands: new Map(),
 		flags: new Map(),
 		shortcuts: new Map(),
+		busDisposers: [],
+		activateEventSubscriptions() {},
+		disposeEventSubscriptions() {},
 	};
 }
 

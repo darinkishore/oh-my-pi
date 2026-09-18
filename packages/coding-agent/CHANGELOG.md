@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `compaction.remoteStrategy` so native Responses streaming compaction models can use context-full maintenance while other models retain the configured fallback strategy.
+
+### Changed
+
+- Replaced forced-completion prompt rules with collaborative guidance: address user interjections before continuing a plan, allow honest pauses with unfinished work, and require verification for claims of success rather than permission to stop. Todo tracking is discretionary unless requested, and clarification guidance distinguishes factual lookup from decisions that need the user's judgment.
+- Extension eval tool resolvers must provide a parameter schema, matching the nested-call validation used by the eval bridge.
+
+### Fixed
+
+- Extension reload preserves prepared/restricted loading modes, stable inline source identities, and restricted tool admission; child sessions receive refreshed prepared factories.
+- Updated local legacy-extension UI helpers to their `pi-tui` homes after the terminal UI migration.
+- Eval `agent()` handles expose the subagent's resolved model after `wait()`, so provider fallback or model substitution remains visible to the caller.
+- Fixed cache-clean extension reloads unmounting every dynamic `xd://` device, including extension, MCP, and RPC host tools.
+- Retired extension tool closures after incompatible schema reloads so disposed state cannot keep handling calls; stale names now direct the model to the versioned replacement.
+- Kept retired extension tool names as serializable own properties so `/reload-extensions` cannot make the next Codex request fail with a missing tool name.
+
 ## [18.2.6] - 2026-09-18
 
 ### Fixed
@@ -759,21 +777,6 @@
 - Session rewrites preserve open-reader snapshots and replacement identity when a rename needs an EPERM fallback.
 - Fixed WorkPool children retaining a stale Gemini-formatted `yield` declaration when pooled items were installed or cleared.
 - Preserve effective context and output limits when model overrides change unrelated settings, such as thinking effort levels.
-### Added
-
-- Added `compaction.remoteStrategy` so native Responses streaming compaction models can use context-full maintenance while other models retain the configured fallback strategy.
-
-### Changed
-
-- Replaced forced-completion prompt rules with collaborative guidance: address user interjections before continuing a plan, allow honest pauses with unfinished work, and require verification for claims of success rather than permission to stop. Todo tracking is discretionary unless requested, and clarification guidance distinguishes factual lookup from decisions that need the user's judgment.
-
-### Fixed
-
-- Eval `agent()` handles expose the subagent's resolved model after `wait()`, so provider fallback or model substitution remains visible to the caller.
-- Fixed cache-clean extension reloads unmounting every dynamic `xd://` device, including extension, MCP, and RPC host tools.
-- Retired extension tool closures after incompatible schema reloads so disposed state cannot keep handling calls; stale names now direct the model to the versioned replacement.
-- Kept retired extension tool names as serializable own properties so `/reload-extensions` cannot make the next Codex request fail with a missing tool name.
-
 ## [18.1.14] - 2026-09-07
 
 ### Fixed

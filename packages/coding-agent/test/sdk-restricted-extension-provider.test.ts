@@ -221,6 +221,9 @@ describe("restricted sessions sharing extension providers", () => {
 					});
 				register("extra");
 				register("read");
+				pi.on("tool_call", event =>
+					event.toolCallId === "deny-after-reload" ? { block: true, reason: "Inherited policy" } : undefined,
+				);
 				pi.on("session_start", () => {
 					register("late_extra");
 					register("read");
@@ -228,8 +231,14 @@ describe("restricted sessions sharing extension providers", () => {
 			},
 			async child => {
 				expect(child.getAllToolNames()).toEqual(["read"]);
+				const runner = child.extensionRunner;
+				if (!runner) throw new Error("Missing extension runner");
+				const report = await runner.createContext().reloadExtensions();
+				expect(report.errors).toEqual([]);
+				expect(child.getAllToolNames()).toEqual(["read"]);
 				const read = child.getToolByName("read");
 				if (!read) throw new Error("Missing restricted read tool");
+				await expect(read.execute("deny-after-reload", { path: allowed })).rejects.toThrow("Inherited policy");
 				const result = await read.execute("allowed", { path: allowed });
 				expect(result.content).toEqual(
 					expect.arrayContaining([
@@ -262,6 +271,49 @@ describe("restricted sessions sharing extension providers", () => {
 				await expect(cancelled).rejects.toThrow(/cancel|abort/i);
 			},
 		);
+	});
+
+	test("reload retains prepared tools alongside child inline tools", async () => {
+		const toolExtension =
+			(name: string): ExtensionFactory =>
+			pi => {
+				pi.registerTool({
+					name,
+					label: name,
+					description: name,
+					parameters: type({}),
+					async execute() {
+						return { content: [{ type: "text", text: name }] };
+					},
+				});
+			};
+		const { session: parent } = await createAgentSession({
+			...createOptions(),
+			extensions: [providerExtension, toolExtension("inherited_probe")],
+		});
+		try {
+			const { session: child } = await createAgentSession({
+				...createOptions(),
+				model: parent.model,
+				preloadedPreparedExtensions: parent.preparedExtensions,
+				extensions: [toolExtension("child_probe")],
+			});
+			try {
+				const runner = child.extensionRunner;
+				if (!runner) throw new Error("Missing extension runner");
+				const report = await runner.createContext().reloadExtensions();
+				expect(report.errors).toEqual([]);
+				for (const name of ["inherited_probe", "child_probe"]) {
+					const tool = child.getToolByName(name);
+					if (!tool) throw new Error(`Missing ${name} after reload`);
+					expect((await tool.execute("probe", {})).content).toEqual([{ type: "text", text: name }]);
+				}
+			} finally {
+				await child.dispose();
+			}
+		} finally {
+			await parent.dispose();
+		}
 	});
 
 	test("does not unregister the parent's provider when extension loading is restricted", async () => {
