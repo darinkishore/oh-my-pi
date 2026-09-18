@@ -23,9 +23,9 @@ const evalProbeExtension: ExtensionFactory = pi => {
 					language: "js",
 					code: `
 globalThis.__extensionEvalProbe = (globalThis.__extensionEvalProbe ?? 0) + 1;
-const replies = await parallel([
-  () => tool.echo({ value: "left" }),
-  () => tool.echo({ value: "right" })
+const replies = await Promise.all([
+  tool.echo({ value: "left" }),
+  tool.echo({ value: "right" })
 ]);
 display({ counter: globalThis.__extensionEvalProbe, replies });`,
 				},
@@ -37,6 +37,7 @@ display({ counter: globalThis.__extensionEvalProbe, replies });`,
 						name === "echo"
 							? {
 									name,
+									parameters: type({ value: "string" }),
 									async execute(_id, args) {
 										if (
 											!args ||
@@ -66,7 +67,7 @@ display({ counter: globalThis.__extensionEvalProbe, replies });`,
 const jsonOutputsOf = (result: { details?: unknown }): unknown[] => {
 	const details = result.details;
 	if (!details || typeof details !== "object" || !("jsonOutputs" in details) || !Array.isArray(details.jsonOutputs)) {
-		throw new Error("eval result omitted jsonOutputs");
+		throw new Error(`eval result omitted jsonOutputs: ${JSON.stringify(result)}`);
 	}
 	return details.jsonOutputs;
 };

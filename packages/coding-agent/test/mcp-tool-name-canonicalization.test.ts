@@ -155,6 +155,7 @@ function xdevStateWith(options: { mounted?: string[]; active?: string[] }): Xdev
 	for (const name of [...mounted, ...active]) tools.set(name, { name } as Tool);
 	return {
 		tools,
+		catalog: new Map(),
 		mountedNames: new Set(mounted),
 		builtInNames: new Set(),
 		isActive: name => active.includes(name),

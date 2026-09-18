@@ -541,6 +541,8 @@ export interface ExtensionEvalParams {
 
 export interface ExtensionEvalTool {
 	name: string;
+	/** Schema used by the eval bridge to validate nested calls. */
+	parameters: TSchema;
 	execute(toolCallId: string, args: unknown, signal?: AbortSignal): Promise<AgentToolResult>;
 }
 

@@ -1654,10 +1654,10 @@ export function isLsToolResult(e: ToolResultEvent): e is LsToolResultEvent {
 // @howaboua/pi-codex-conversion) import these from the package root; bridge
 // them to their OMP homes so plugin validation and runtime resolution succeed.
 // ---------------------------------------------------------------------------
-export { renderDiff } from "../modes/components/diff";
-export { keyHint } from "../modes/components/keybinding-hints";
-export { truncateToVisualLines } from "../modes/components/visual-truncate";
-export { getSettingsListTheme } from "../modes/theme/theme";
+export { renderDiff } from "@oh-my-pi/pi-tui/chrome/diff";
+export { keyHint } from "@oh-my-pi/pi-tui/chrome/keybinding-hints";
+export { truncateToVisualLines } from "@oh-my-pi/pi-tui/chrome/visual-truncate";
+export { getSettingsListTheme } from "@oh-my-pi/pi-tui/theme";
 export { convertToLlm } from "../session/messages";
 export { buildSessionContext } from "../session/session-context";
 

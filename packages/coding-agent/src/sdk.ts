@@ -2278,6 +2278,13 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// rebuild their own session-scoped extensions.
 		toolSession.extensionPaths = extensionPaths;
 		toolSession.effectiveExtensionRoots = buildSessionExtensionRoots;
+		const rebindPreparedOnReload = !!restrictToolNames || !!options.preloadedPreparedExtensions;
+		extensionsResult.preparedExtensions ??= [];
+		const inheritedPreparedExtensions = [...extensionsResult.preparedExtensions];
+		const inheritedInlineExtensions = inheritedPreparedExtensions.filter(extension =>
+			extension.path.startsWith("<inline"),
+		);
+		const inlineExtensionSourceIds: string[] = [];
 
 		// Inline source ids must remain stable when caller factories are rebound in
 		// child sessions. Start after any prepared inline sources so SDK-provided
@@ -2298,6 +2305,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			for (let i = 0; i < inlineExtensions.length; i++) {
 				const factory = inlineExtensions[i];
 				const sourceId = `<inline-${nextInlineExtensionIndex++}>`;
+				inlineExtensionSourceIds.push(sourceId);
 				const loaded = await loadExtensionFromFactory(factory, cwd, eventBus, extensionsResult.runtime, sourceId);
 				extensionsResult.extensions.push(loaded);
 				if (i < rebindableInlineExtensionCount) {
@@ -2929,6 +2937,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					const resolveEvalTool = (name: string) => evalOptions.resolveTool?.(name) as AgentTool | undefined;
 					evalSession.getToolByName = resolveEvalTool;
 					evalSession.getToolForEvalBridge = resolveEvalTool;
+					evalSession.getEvalBridgeToolNames = () =>
+						(toolSession.getEvalBridgeToolNames?.() ?? []).filter(name => resolveEvalTool(name) !== undefined);
 				}
 				const evalTool = new EvalTool(evalSession);
 				return await evalTool.execute(
@@ -3839,7 +3849,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				}
 			},
 			resolveFallbackTool: (name, advertised) =>
-				(hasSession ? session.getDeferredExtensionToolByName(name) : undefined) ?? resolveDeviceTool(name, advertised),
+				(hasSession ? session.getDeferredExtensionToolByName(name) : undefined) ??
+				resolveDeviceTool(name, advertised),
 			suggestFallbackToolNames: suggestDeviceToolNames,
 			intentTracing: !!intentField,
 			pruneToolDescriptions: inlineToolDescriptors,
@@ -4286,7 +4297,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			reloadOptions?: ExtensionsReloadOptions,
 		): Promise<ExtensionsReloadReport> => {
 			let paths: string[];
-			if (options.preloadedExtensionPaths) {
+			if (rebindPreparedOnReload) {
+				paths = [];
+			} else if (options.preloadedExtensions) {
+				paths = extensionPaths;
+			} else if (options.preloadedExtensionPaths) {
 				paths = options.preloadedExtensionPaths;
 			} else {
 				resetDiscoveryFsCache();
@@ -4294,14 +4309,23 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			}
 
 			bumpExtensionGraphGeneration();
-			const previousExtensionToolNames = extensionRunner
-				.getAllRegisteredTools()
-				.map(registered => registered.definition.name);
+			const previousExtensionToolNames = restrictToolNames
+				? []
+				: extensionRunner.getAllRegisteredTools().map(registered => registered.definition.name);
 			const previousFlagValues = new Map(extensionsResult.runtime.flagValues);
-			const freshResult = await loadExtensions(paths, cwd, eventBus, {
+			const loadOptions = {
 				runtime: extensionsResult.runtime,
 				stageEventSubscriptions: true,
-			});
+			};
+			const freshResult = rebindPreparedOnReload
+				? await bindPreparedExtensions(inheritedPreparedExtensions, cwd, eventBus, loadOptions)
+				: await loadExtensions(paths, cwd, eventBus, loadOptions);
+			if (!rebindPreparedOnReload && inheritedInlineExtensions.length > 0) {
+				const rebound = await bindPreparedExtensions(inheritedInlineExtensions, cwd, eventBus, loadOptions);
+				freshResult.extensions.push(...rebound.extensions);
+				freshResult.errors.push(...rebound.errors);
+				freshResult.preparedExtensions?.push(...(rebound.preparedExtensions ?? []));
+			}
 			for (let index = 0; index < inlineExtensions.length; index += 1) {
 				const factory = inlineExtensions[index];
 				if (!factory) {
@@ -4313,13 +4337,21 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						cwd,
 						eventBus,
 						extensionsResult.runtime,
-						`<inline-${index}>`,
+						inlineExtensionSourceIds[index],
 						false,
 					);
 					freshResult.extensions.push(extension);
+					if (index < rebindableInlineExtensionCount) {
+						freshResult.preparedExtensions?.push({
+							path: inlineExtensionSourceIds[index],
+							resolvedPath: inlineExtensionSourceIds[index],
+							factory,
+							error: null,
+						});
+					}
 				} catch (error) {
 					freshResult.errors.push({
-						path: `<inline-${index}>`,
+						path: inlineExtensionSourceIds[index],
 						error: error instanceof Error ? error.message : String(error),
 					});
 				}
@@ -4335,7 +4367,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				return abortedReloadReport(freshResult.errors);
 			}
 
-			const registeredFreshTools = freshResult.extensions.flatMap(extension => [...extension.tools.values()]);
+			const registeredFreshTools = restrictToolNames
+				? []
+				: freshResult.extensions.flatMap(extension => [...extension.tools.values()]);
 			const freshWrappedTools: AgentTool[] = wrapRegisteredTools(registeredFreshTools, extensionRunner)
 				.map(wrapToolWithMetaNotice)
 				.map(tool => new ExtensionToolWrapper(tool, extensionRunner) as AgentTool);
@@ -4358,12 +4392,26 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			}
 
 			extensionRunner.replaceExtensions(freshResult.extensions);
+			extensionsResult.preparedExtensions?.splice(
+				0,
+				extensionsResult.preparedExtensions.length,
+				...(freshResult.preparedExtensions ?? []),
+			);
+			extensionPaths.splice(
+				0,
+				extensionPaths.length,
+				...freshResult.extensions
+					.map(extension => extension.resolvedPath)
+					.filter(path => !path.startsWith("<inline")),
+			);
 			const sources = freshResult.extensions.map(extension => extension.path);
 			const providerRegistrations = extensionsResult.runtime.pendingProviderRegistrations.splice(0);
 			try {
-				modelRegistry.syncExtensionSources(sources);
-				for (const sourceId of new Set(sources)) {
-					modelRegistry.clearSourceRegistrations(sourceId);
+				if (!restrictToolNames) {
+					modelRegistry.syncExtensionSources(sources);
+					for (const sourceId of new Set(sources)) {
+						modelRegistry.clearSourceRegistrations(sourceId);
+					}
 				}
 				for (const { name, config, sourceId } of providerRegistrations) {
 					modelRegistry.registerProvider(name, config, sourceId);
