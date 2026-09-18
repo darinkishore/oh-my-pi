@@ -29,11 +29,12 @@ judge(state, questions) → JudgmentHandle
       `{type: "score", instructions, criteria: [lowest, …, highest]}` → `{score, probabilities: {"0": p, …}, confidence}` (≥2 levels; score is the probability-weighted level index)
 {{#if spawns}}agent(prompt, agent?="{{spawnDefaultAgent}}", label?=None, schema?=None, schema{{#if js}}Mode{{else}}_mode{{/if}}?="permissive", isolated?=None, apply?=None, merge?=None{{#if evalTools}}, tools?=None{{/if}}) → AgentHandle
     Spawns a background subagent and returns immediately. `agent` selects a discovered agent; omit it to use `{{spawnDefaultAgent}}`.{{#if spawnAllowedAgentsText}} Allowed agents: {{spawnAllowedAgentsText}}.{{/if}} Handle: `.id`, `.handle` ("agent://<id>"), `.status`, `.done()`, `.wait(timeout?)` → final text (parsed with `schema`), `.send(message)`, `.cancel()`, `.output()`. Unwaited results auto-deliver like async jobs. `schema` overrides agent/session schemas; `isolated` requests a worktree; `apply`/`merge` control its changes.{{#if evalTools}} `tools`: names of your @tool-defined tools the child may call.{{/if}}
-{{#if js}}    JS: ONE trailing object — agent(prompt, { agent, label, schema, schemaMode, isolated, apply, merge{{#if evalTools}}, tools{{/if}} }).{{/if}}
+{{#if js}}    JS: ONE trailing object — await agent(prompt, { agent, label, schema, schemaMode, isolated, apply, merge{{#if evalTools}}, tools{{/if}} }). Await registers the handle, not the agent's completion; use `.wait()` for the result.{{/if}}
 workpool(agent?=None, name?=None, context?=None{{#if evalTools}}, tools?=None{{/if}}) → WorkPool
     {{#if eagerDelegation}}Default for 2+ independent items.{{else}}Keep-alive worker pool for a batch of independent items.{{/if}} `.push(*items)`; `.status()`; `.peek()`; `.close()`. Pool name = async job id; results auto-deliver, or poll outside eval with `hub wait` and `ids:[pool.name]`. `eval.workpool.freshAgents=true` uses a new agent per item.
 {{/if}}
-wait(handles, timeout?=None, raise_errors?=True) → list
+{{#if js}}JS factories (`agent`, `completion`, `judge`) return thenable handles. Await the factory before reading `.id`/`.handle`; methods like `.wait()` can be called without awaiting registration first. Original handles expose live fields after registration.
+{{/if}}wait(handles, timeout?=None, raise_errors?=True) → list
     Barrier over agent/completion/judgment handles, results in input order. `raise_errors=False` keeps the error in its slot.{{#if js}} JS: wait(handles, { timeout, raiseErrors }).{{/if}}
 {{#if evalTools}}{{#if py}}@tool / tool(fn, name=None, description=None){{/if}}{{#if js}}tool(fn, { name?, description?, parameters? }){{/if}}
     Define a tool that runs in this kernel{{#if py}} (schema inferred from type hints){{/if}}; reference by name in `task` items' `tools`{{#if spawns}}, `agent(tools=…)`, `workpool(tools=…)`{{/if}}. `tool.defined()`, `tool.undefine(name)`.
@@ -49,7 +50,7 @@ budget → {{#if py}}`budget.total` (ceiling or None), `budget.spent()`, `budget
 {{#if spawns}}
 <dag>
 Acyclic waves of handles:
-- **Name nodes.** `h = agent(…)` returns at once; `h.handle` is `agent://<id>`.
+- **Name nodes.** `{{#if js}}const h = await agent(…){{else}}h = agent(…){{/if}}` registers a background agent; `h.handle` is `agent://<id>`.{{#if js}} Await registers only; it does not wait for the agent's result.{{/if}}
 - **Wire edges.** Put an upstream `.wait()` result or `.handle` in the downstream prompt. Bulk: `write("local://<name>.md", …)`.
 - **`wait(hs)`** = wave barrier. Open-ended item streams → `workpool()`.
 - **Isolate failure.** `wait(hs, raise_errors=False)` keeps a failure in its slot; only that subtree degrades.

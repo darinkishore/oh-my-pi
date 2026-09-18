@@ -200,11 +200,39 @@ if (!globalThis.__omp_js_prelude_loaded__) {
 	// over an async round-trip — so the factory returns this thenable instead:
 	// `await` it to get the resolved handle (for dag wiring via `.id`/`.handle`),
 	// or call the handle methods directly (`h.wait()`, `h.status()`, …) and they
-	// await resolution internally. This matches the documented immediate-handle
-	// contract that Python satisfies natively via its synchronous bridge.
+	// await resolution internally. The original wrapper also exposes live fields
+	// once registered, including metadata added later by wait().
 	class PendingHandle {
-		constructor(promise) {
-			this._promise = promise;
+		constructor(promise, factory) {
+			let resolved;
+			this._promise = promise.then(handle => {
+				resolved = handle;
+				return handle;
+			});
+			return new Proxy(this, {
+				get(target, key, receiver) {
+					if (Reflect.has(target, key)) return Reflect.get(target, key, receiver);
+					if (resolved) return Reflect.get(resolved, key);
+					if (key === "id" || key === "handle") {
+						throw new Error(
+							`Handle registration is pending; await ${factory}(...) before reading .${key}. This does not wait for completion.`,
+						);
+					}
+					return undefined;
+				},
+				has(target, key) {
+					return Reflect.has(target, key) || (resolved !== undefined && Reflect.has(resolved, key));
+				},
+				ownKeys(target) {
+					return resolved
+						? [...new Set([...Reflect.ownKeys(target), ...Reflect.ownKeys(resolved)])]
+						: Reflect.ownKeys(target);
+				},
+				getOwnPropertyDescriptor(target, key) {
+					return Reflect.getOwnPropertyDescriptor(target, key)
+						?? (resolved ? Reflect.getOwnPropertyDescriptor(resolved, key) : undefined);
+				},
+			});
 		}
 
 		then(onFulfilled, onRejected) {
@@ -314,7 +342,7 @@ if (!globalThis.__omp_js_prelude_loaded__) {
 			if (!result || typeof result.id !== "string") throw new Error("completion() did not return a handle");
 			return new CompletionHandle(result.id, options.schema);
 		})();
-		return new PendingHandle(promise);
+		return new PendingHandle(promise, "completion");
 	};
 
 	const judge = (state, questions) => {
@@ -326,7 +354,7 @@ if (!globalThis.__omp_js_prelude_loaded__) {
 			if (!result || typeof result.id !== "string") throw new Error("judge() did not return a handle");
 			return new JudgmentHandle(result.id);
 		})();
-		return new PendingHandle(promise);
+		return new PendingHandle(promise, "judge");
 	};
 
 	const agent = (prompt, opts, ...rest) => {
@@ -342,7 +370,7 @@ if (!globalThis.__omp_js_prelude_loaded__) {
 			if (!result || typeof result.id !== "string") throw new Error("agent() did not return a handle");
 			return new AgentHandle(result.id, result.agent, options.schema);
 		})();
-		return new PendingHandle(promise);
+		return new PendingHandle(promise, "agent");
 	};
 
 	class WorkPool {

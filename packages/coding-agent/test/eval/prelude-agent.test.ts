@@ -130,6 +130,57 @@ describe("eval js agent() handle", () => {
 });
 
 describe("eval js immediate-handle contract", () => {
+	it("exposes registered identity and settled metadata on the original pending handle", async () => {
+		const registration = Promise.withResolvers<{ id: string; agent: string }>();
+		const sandbox = loadPrelude(async name => {
+			if (name === "__agent__") return registration.promise;
+			if (name === "__wait__") {
+				return {
+					items: [
+						{
+							status: "completed",
+							text: '{"ok":true}',
+							data: { ok: true },
+							model: "p/model",
+							details: { model: "p/model" },
+						},
+					],
+				};
+			}
+			throw new Error(`unexpected bridge call ${name}`);
+		});
+		const handle = (sandbox.agent as AgentHelper)("go") as unknown as {
+			id: string;
+			handle: string;
+			agent: string;
+			text?: string;
+			data?: unknown;
+			model?: string;
+			details?: unknown;
+			wait(): Promise<unknown>;
+		};
+		expect(() => handle.handle).toThrow("await agent(...)");
+		expect(() => handle.id).toThrow("await agent(...)");
+		registration.resolve({ id: "a-3", agent: "reviewer" });
+		await handle;
+		expect(handle.id).toBe("a-3");
+		expect(handle.handle).toBe("agent://a-3");
+		expect(handle.agent).toBe("reviewer");
+		expect(Object.hasOwn(handle, "data")).toBe(false);
+		expect("data" in handle).toBe(false);
+
+		const waitAll = sandbox.wait as (handles: unknown) => Promise<unknown[]>;
+		expect(await waitAll([handle])).toEqual([{ ok: true }]);
+		expect(handle.text).toBe('{"ok":true}');
+		expect(handle.data).toEqual({ ok: true });
+		expect(handle.model).toBe("p/model");
+		expect(handle.details).toEqual({ model: "p/model" });
+		expect(Object.hasOwn(handle, "data")).toBe(true);
+		expect("data" in handle).toBe(true);
+		expect(Object.keys(handle)).toContain("data");
+		expect(await handle.wait()).toEqual({ ok: true });
+	});
+
 	// Regression for #10986: the JS factories return immediately, so the
 	// documented pattern `const h = completion(...); await h.wait()` must work
 	// without first `await`-ing the factory itself.
@@ -139,11 +190,18 @@ describe("eval js immediate-handle contract", () => {
 			if (name === "__wait__") return { items: [{ status: "completed", text: "OK" }] };
 			throw new Error(`unexpected bridge call ${name}`);
 		});
-		const completion = sandbox.completion as (prompt: string, opts?: unknown) => { wait(): Promise<unknown> };
+		const completion = sandbox.completion as (
+			prompt: string,
+			opts?: unknown,
+		) => {
+			id: string;
+			wait(): Promise<unknown>;
+		};
 
 		const handle = completion("Return OK", { model: "smol" });
 		expect(typeof handle.wait).toBe("function");
 		expect(await handle.wait()).toBe("OK");
+		expect(handle.id).toBe("c-1");
 	});
 
 	it("treats an un-awaited factory result as a single handle in wait()", async () => {
@@ -154,7 +212,10 @@ describe("eval js immediate-handle contract", () => {
 		});
 		const waitAll = sandbox.wait as (handles: unknown) => Promise<unknown[]>;
 
-		expect(await waitAll((sandbox.agent as AgentHelper)("go"))).toEqual(["done"]);
+		const handle = (sandbox.agent as AgentHelper)("go") as unknown as { handle: string };
+		expect(await waitAll(handle)).toEqual(["done"]);
+		expect(handle.handle).toBe("agent://a-2");
+		expect(Object.hasOwn(handle, "data")).toBe(false);
 	});
 });
 

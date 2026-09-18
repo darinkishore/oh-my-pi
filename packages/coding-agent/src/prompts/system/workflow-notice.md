@@ -22,6 +22,7 @@ State persists across `eval` calls. Every call provides:
 - `completion(prompt, *, model="default", system=None, schema=None)`: immediate `CompletionHandle` for a tool-free one-shot call. Tiers: `"smol"`, `"default"`, `"slow"`.
 - `judge(state, questions)`: immediate `JudgmentHandle` for typed `choice`/`bool`/`score` questions over one state; `.wait()` returns `{id: answer}` with probabilities. Cheaper than `completion()` for classification.
 - `wait(handles, timeout=None, *, raise_errors=True)`: ordered barrier for agent/completion/judgment handles only; `raise_errors=False` keeps an error in its slot.
+- JavaScript: `await agent(...)` (likewise `completion`/`judge`) registers the handle without waiting for its result. Await registration before reading `.id`/`.handle`; `.wait()` can be called directly on an un-awaited handle.
 {{#if evalTools}}- `@tool` (Python) / `tool(fn, {…})` (JS): kernel-local tool exposed via `tools=`. Use for shared caches, dedup sets, scoring, or structured accumulation across pool workers; calls execute in YOUR kernel and a raised exception returns to the caller without killing it.
 {{/if}}- `log(message)`: progress line. `phase(title)`: status-tree phase.
 - `budget`: Python `budget.total` / `budget.spent()` / `budget.remaining()`; JS awaits them. User `+Nk` = advisory; `+Nk!` = hard.
