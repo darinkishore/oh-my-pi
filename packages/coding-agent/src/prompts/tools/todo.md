@@ -19,26 +19,18 @@ After each successful state-changing op: if nothing is `in_progress`, the earlie
 
 ## Anatomy
 
-- Task content: 5–10 words; what, not how; unique identifier.
+- Task content: concise, descriptive, and unique; it is the identifier.
 - Phase name: short noun phrase (e.g. `Foundation`, `Auth`, `Verification`); unique identifier. NEVER prefix `1.`, `A)`, `Phase 1:`.
 
 ## Rules
 
-- Mark tasks done immediately after finishing; complete phases in order.
-- NEVER make a todo call the turn's only tool call. Batch with real work: `init` with first reads/edits; each `done`/`start` with next action. Solo todo turns waste a round trip.
-- Waiting on something you can't act on—a user decision, another agent, external service: `block` task (optional `reason`); remains tracked but avoids stop reminder. Blocking the active task hands `in_progress` to the next `pending` task, never back to the blocked one. `unblock` when actionable. If blocker agent-actionable, `append` an unblocking task instead.
+- Update status at meaningful checkpoints. A pending list records unfinished work; it does not require you to keep working or prevent you from replying to the user.
+- Use `block` for a real dependency, not merely because you are pausing the conversation. Blocking the active task hands `in_progress` to the next `pending` task; use `unblock` when the dependency clears.
 - Keep introduced `task`/`phase` strings stable.
 - Lost exact task text: `view` echoes list; NEVER guess from memory.
 
-## Create a list
+## When to use
 
-- Task requires 3+ distinct steps.
-- User explicitly requests one.
-- User provides a set of tasks.
-- New instructions arrive mid-task: capture before proceeding.
-
-<critical>
-User gives multi-step plan—phased todo, numbered/bulleted checklist, or "N bugs/items/tasks":
-- MUST `init` every item as its own task before working.
-- Enumerate all; NEVER summarize into fewer tasks, sample "the important ones", drop items, or track the rest from memory.
-</critical>
+- Create a list when the user requests one or when tracking it materially helps preserve scope across substantial work. A short multi-step task or a conversational list does not automatically need todos.
+- Preserve every requested outcome, whether or not it has its own todo row. Do not silently drop scope to simplify the list.
+- When the user changes direction, address the message first; reconcile the list with the agreed direction afterward. Bookkeeping is not a prerequisite for conversation.
