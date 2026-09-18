@@ -175,6 +175,7 @@
 
 ### Fixed
 
+- JavaScript eval handles expose registered identity and settled result fields on the original un-awaited wrapper; premature ID/URI access explains how to await registration without waiting for completion.
 - Extension reload preserves prepared/restricted loading modes, stable inline source identities, and restricted tool admission; child sessions receive refreshed prepared factories.
 - Updated local legacy-extension UI helpers to their `pi-tui` homes after the terminal UI migration.
 - Eval `agent()` handles expose the subagent's resolved model after `wait()`, so provider fallback or model substitution remains visible to the caller.
