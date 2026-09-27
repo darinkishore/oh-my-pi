@@ -264,7 +264,6 @@ import {
 	WriteTool,
 	warmupLspServers,
 	xdevCatalogEntries,
-	xdevDocsAll,
 	xdevEntries,
 } from "./tools";
 import { createBrowserPrelude } from "./tools/browser";
