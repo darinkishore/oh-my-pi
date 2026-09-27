@@ -160,7 +160,12 @@ import type {
 import { emitSessionShutdownEvent, TOP_LEVEL_AGENT } from "../extensibility/extensions";
 import { ManagedTimers } from "../extensibility/extensions/managed-timers";
 import { createExtensionModelQuery } from "../extensibility/extensions/model-api";
-import type { CompactOptions, ContextUsage, ExtensionsReloadOptions, ExtensionsReloadReport } from "../extensibility/extensions/types";
+import type {
+	CompactOptions,
+	ContextUsage,
+	ExtensionsReloadOptions,
+	ExtensionsReloadReport,
+} from "../extensibility/extensions/types";
 import type { CustomCommandContext } from "../extensibility/custom-commands/types";
 import { SkillDescriptionCatalog } from "../extensibility/skill-descriptions";
 import type { Skill, SkillWarning } from "../extensibility/skills";
@@ -680,6 +685,7 @@ export class AgentSession implements SettingsScope {
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
 	readonly settings: Settings;
+	readonly #preferWebsocketsOverride: boolean | undefined;
 	/** Session-start policy, independent of the selected project memory backend. */
 	readonly memoryEnabled: boolean;
 	/** Entries of tools mounted under `xd://`; empty when virtual devices are unmounted. */
@@ -1462,6 +1468,7 @@ export class AgentSession implements SettingsScope {
 		this.#codeModeState = config.codeModeState ?? {};
 		this.sessionManager = config.sessionManager;
 		this.settings = config.settings;
+		this.#preferWebsocketsOverride = config.preferWebsockets;
 		this.#skillDescriptions = config.skillDescriptions ?? new SkillDescriptionCatalog();
 		this.memoryEnabled = config.memoryEnabled ?? true;
 		this.#modelRegistry = config.modelRegistry;
@@ -2559,7 +2566,7 @@ export class AgentSession implements SettingsScope {
 
 	/** Hint forwarded to provider calls that support websocket transport; read live from `providers.openaiWebsockets`. */
 	get preferWebsockets(): boolean | undefined {
-		return resolveOpenAIWebsocketPreference(this.settings);
+		return this.#preferWebsocketsOverride ?? resolveOpenAIWebsocketPreference(this.settings);
 	}
 
 	getHindsightSessionState(): HindsightSessionState | undefined {

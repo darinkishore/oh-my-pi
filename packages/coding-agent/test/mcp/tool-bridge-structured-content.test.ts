@@ -138,7 +138,9 @@ describe("MCP bridge structuredContent", () => {
 			expect(details.mcpToolName).toBe("list_issues");
 			expect(details.isError).toBe(true);
 			const value = bridgeValueFromToolResult(tool.name, {}, result);
-			if (typeof value !== "object" || !("details" in value)) throw new Error("Expected eval details");
+			if (typeof value !== "object" || !("details" in value) || !("hasError" in value)) {
+				throw new Error("Expected errored eval tool details");
+			}
 			expect((value.details as MCPToolDetails).structuredContent).toEqual(structuredContent);
 			expect(value.hasError).toBe(true);
 			expect(value.text).not.toContain(structuredContent.pages[0]!.rows[0]!.body);

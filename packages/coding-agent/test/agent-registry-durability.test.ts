@@ -51,7 +51,7 @@ describe("IrcBus transition durability", () => {
 		const { bus } = createBus();
 		const receipt = await bus.send({ from: "peer", to: MAIN_AGENT_ID, body: "lane report" });
 		expect(receipt).toMatchObject({ outcome: "failed", error: expect.stringContaining("buffered") });
-		expect(bus.inbox(MAIN_AGENT_ID).map(message => message.body)).toEqual(["lane report"]);
+		expect(bus.take(MAIN_AGENT_ID)?.body).toBe("lane report");
 	});
 
 	it("lets a ref-less pending wait consume mail directly", async () => {
@@ -81,7 +81,7 @@ describe("IrcBus transition durability", () => {
 		});
 		const receipt = await bus.send({ from: "peer", to: "detached", body: "mid-transition" });
 		expect(receipt).toMatchObject({ outcome: "failed", error: expect.stringContaining("buffered") });
-		expect(bus.inbox("detached").map(message => message.body)).toEqual(["mid-transition"]);
+		expect(bus.take("detached")?.body).toBe("mid-transition");
 	});
 
 	it("does not buffer mail to an aborted ref", async () => {
