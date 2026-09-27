@@ -272,7 +272,6 @@ import {
 	WriteTool,
 	warmupLspServers,
 	xdevCatalogEntries,
-	xdevDocsAll,
 	xdevEntries,
 } from "./tools";
 import { resolveYieldReportText } from "./tools/yield";

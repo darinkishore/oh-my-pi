@@ -1002,5 +1002,4 @@ describe("system prompt tool inventory", () => {
 		expect(withScout).toContain("read-only scout");
 		expect(withoutScout).not.toContain("read-only scout");
 	});
-
 });
