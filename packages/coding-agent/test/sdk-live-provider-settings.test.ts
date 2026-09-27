@@ -103,5 +103,32 @@ describe("primary-agent provider settings changed mid-session", () => {
 		// Owned dialect: no native tool specs; the catalog rides in the system prompt.
 		expect(second?.context.tools).toBeUndefined();
 		expect((second?.context.systemPrompt?.length ?? 0) > (first?.context.systemPrompt?.length ?? 0)).toBe(true);
+
+		// A crew session explicitly pinned to SSE must not follow mutable host settings.
+		const { session: pinned } = await createAgentSession({
+			cwd: tempDir.path(),
+			agentDir: tempDir.path(),
+			sessionManager: SessionManager.inMemory(tempDir.path()),
+			authStorage,
+			modelRegistry: new ModelRegistry(authStorage, tempDir.join("models.yml")),
+			settings,
+			model,
+			preferWebsockets: false,
+			disableExtensionDiscovery: true,
+			skills: [],
+			contextFiles: [],
+			promptTemplates: [],
+			slashCommands: [],
+			enableMCP: false,
+			enableLsp: false,
+			skipPythonPreflight: true,
+			taskDepth: 1,
+			agentId: "SubAgentPinned",
+		});
+		sessions.push(pinned);
+		cfgProvidersOpenaiWebsockets.set(settings, "on");
+		await pinned.sendUserMessage("pinned");
+		expect(requests.at(-1)?.options?.preferWebsockets).toBe(false);
+		expect(pinned.preferWebsockets).toBe(false);
 	});
 });

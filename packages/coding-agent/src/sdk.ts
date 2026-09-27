@@ -4061,7 +4061,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			.map(name => toolRegistry.get(name))
 			.filter((tool): tool is AgentTool => tool !== undefined);
 
-
 		// `model` is final here: deferred patterns, auth fallback, and extension
 		// role reclaim have all run, so a resolver can scope tiers to its family.
 		const resolvedServiceTierByFamily = options.resolveServiceTierByFamily?.(model);
@@ -4121,7 +4120,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				...streamOptions,
 				thinkingBudgets: streamOptions?.thinkingBudgets ?? cfgThinkingBudgets.get(settings),
 				kimiApiFormat: streamOptions?.kimiApiFormat ?? (kimiApiFormat === "auto" ? undefined : kimiApiFormat),
-				preferWebsockets: streamOptions?.preferWebsockets ?? resolveOpenAIWebsocketPreference(settings),
+				preferWebsockets:
+					streamOptions?.preferWebsockets ??
+					options.preferWebsockets ??
+					resolveOpenAIWebsocketPreference(settings),
 			});
 		};
 		// Prompt-cache warmer for the main agent loop only: replays the last
@@ -4370,6 +4372,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			serviceTierByFamily: initialServiceTierByFamily,
 			sessionManager,
 			settings,
+			preferWebsockets: options.preferWebsockets,
 			additionalExtensionPaths: options.additionalExtensionPaths,
 			extensionRoots: buildSessionExtensionRoots,
 			preparedExtensions: extensionsResult.preparedExtensions,

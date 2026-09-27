@@ -137,6 +137,8 @@ export interface AgentSessionConfig {
 	codeModeState?: { namespacesInfo?: unknown };
 	sessionManager: SessionManager;
 	settings: Settings;
+	/** Session-scoped transport preference, overriding live settings when supplied. */
+	preferWebsockets?: boolean;
 	/**
 	 * Live extension-root policy inherited from the owning session. Subagents use
 	 * this provider so explicit roots, discovery mode, configured roots, and
