@@ -311,6 +311,10 @@
 - Fixed extension tool renderers using upstream pi’s `renderCall(args, theme, context)` signature failing to render.
 - Fixed Nix flake and NixOS module builds failing because the native package version stamp was not recognized.
 - Fixed Nix dependency-lock checks failing after obsolete stats chart dependencies were removed.
+### Added
+
+- Added `model` and `fork` options to eval `agent()` in JavaScript and Python. Forks copy the persisted parent conversation while retaining native subagent tools, identity, and lifecycle.
+
 ### Fixed
 
 - Restored per-command `bash` environment overlays outside service mode, including foreground, background, PTY, and client-terminal execution. Session extensions can supply environment defaults without rewriting commands or changing the host process environment.
