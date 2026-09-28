@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Restored per-command `bash` environment overlays outside service mode, including foreground, background, PTY, and client-terminal execution. Session extensions can supply environment defaults without rewriting commands or changing the host process environment.
+
 ## [18.3.5] - 2026-09-27
 
 ### Added

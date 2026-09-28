@@ -334,6 +334,7 @@ const bashSchemaBase = type({
 	"timeout?": type("number").describe(BASH_TIMEOUT_DESCRIPTION),
 	"cwd?": "string",
 	"pty?": "boolean",
+	"env?": type.record("string", "string"),
 });
 
 const bashSchemaWithAsync = type({
@@ -342,6 +343,7 @@ const bashSchemaWithAsync = type({
 	"cwd?": "string",
 	"pty?": "boolean",
 	"async?": "boolean",
+	"env?": type.record("string", "string"),
 });
 
 const bashSchemaWithService = type({
@@ -789,6 +791,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 	#startManagedBashJob(options: {
 		command: string;
 		commandCwd: string;
+		env?: Record<string, string>;
 		timeoutMs: number | undefined;
 		timeoutSec: number | undefined;
 		requestedTimeoutSec?: number;
@@ -820,6 +823,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 				try {
 					const result = await executeBash(options.command, {
 						cwd: options.commandCwd,
+						env: options.env,
 						sessionKey: `${this.session.getSessionId?.() ?? ""}:async:${jobId}`,
 						timeout: options.timeoutMs ?? 0,
 						signal: runSignal,
@@ -926,8 +930,8 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 			if (!this.#launchEnabled) throw new ToolError("Service launch is disabled in this session.");
 			if (asyncRequested !== undefined || rawTimeout !== undefined)
 				throw new ToolError("Service mode does not accept async or timeout; use ready.timeout for readiness.");
-		} else if (ready !== undefined || env !== undefined) {
-			throw new ToolError("ready and env require a service name.");
+		} else if (ready !== undefined) {
+			throw new ToolError("ready requires a service name.");
 		}
 		if (asyncRequested && !cfgAsyncEnabled.get(this.session.settings)) {
 			throw new ToolError("Async bash execution is disabled. Enable async.enabled to use async mode.");
@@ -1059,6 +1063,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 			const job = this.#startManagedBashJob({
 				command,
 				commandCwd,
+				env,
 				timeoutMs,
 				timeoutSec,
 				requestedTimeoutSec,
@@ -1099,6 +1104,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 			const job = this.#startManagedBashJob({
 				command,
 				commandCwd,
+				env,
 				timeoutMs,
 				timeoutSec,
 				requestedTimeoutSec,
@@ -1162,6 +1168,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 		const backendPreflight =
 			bridgeTerminalAvailable || canUseInteractiveBashPty(pty === true, ctx)
 				? await applyDirenvPreflight(command, commandCwd, {
+						callerEnv: env,
 						signal,
 						timeoutMs: cfgBashDirenvLoadTimeoutMs.get(this.session.settings),
 						callerTimeoutMs: timeoutMs,
@@ -1461,6 +1468,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 				// command here so the unset prefix is not applied twice.
 				await executeBash(command, {
 					cwd: commandCwd,
+					env,
 					sessionKey: this.session.getSessionId?.() ?? undefined,
 					timeout: timeoutMs ?? 0,
 					signal,
