@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `model` and `fork` options to eval `agent()` in JavaScript and Python. Forks copy the persisted parent conversation while retaining native subagent tools, identity, and lifecycle.
+
 ### Fixed
 
 - Restored per-command `bash` environment overlays outside service mode, including foreground, background, PTY, and client-terminal execution. Session extensions can supply environment defaults without rewriting commands or changing the host process environment.
