@@ -1,6 +1,6 @@
 Persistent shell: one fact command/pipeline; dependencies use `&&`.
 {{#if hasEval}}Scripts/heredocs/`$(…)`/complex pipelines → `eval`.{{else}}Scripts/heredocs/`$(…)`/complex flow → dedicated tool or checked-in script.{{/if}}
-`cwd`, not `cd`; `pty` only interactive.
+`cwd`, not `cd`; `pty` only interactive. `env` overlays variables for this execution, not sibling sessions or later calls.
 Internal URIs work as paths for builtins/coreutils, redirects, globs.
 {{#if asyncEnabled}}`async` defers finite results; timeout unchanged.{{/if}}
 No `head`/`tail`/redirection; output trunc by default, full result at `artifact://<id>`.

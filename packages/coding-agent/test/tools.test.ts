@@ -2307,6 +2307,60 @@ function b() {
 	});
 
 	describe("bash tool", () => {
+		it.each(["foreground", "async", "auto-background"] as const)(
+			"keeps %s environment overlays literal and isolated between calls and sessions",
+			async mode => {
+				const results = new Map<string, string>();
+				const manager = new AsyncJobManager({
+					onJobComplete: async (id, text) => {
+						results.set(id, text);
+					},
+				});
+				const settings = Settings.isolated({
+					"async.enabled": true,
+					"bash.autoBackground.enabled": mode === "auto-background",
+					"bash.autoBackground.thresholdMs": 0,
+					"bash.direnv": "off",
+				});
+				const firstId = `env-first-${Snowflake.next()}`;
+				const secondId = `env-second-${Snowflake.next()}`;
+				const first = new BashTool(
+					createTestToolSession(testDir, settings, {
+						getSessionId: () => firstId,
+						asyncJobManager: manager,
+					}),
+				);
+				const second = new BashTool(
+					createTestToolSession(testDir, settings, {
+						getSessionId: () => secondId,
+						asyncJobManager: manager,
+					}),
+				);
+				const value = "memory path/'quoted'/$literal; not a command";
+				const execute = async (tool: BashTool, env?: Record<string, string>) => {
+					const result = await tool.execute("env-overlay", {
+						command: "printf '<%s>' \"$OMP_TEST_BASH_ENV_OVERLAY\"",
+						env,
+						...(mode === "async" ? { async: true } : {}),
+					});
+					const jobId = result.details?.async?.jobId;
+					if (!jobId) return getTextOutput(result);
+					await manager.waitForAll();
+					await manager.drainDeliveries();
+					return results.get(jobId);
+				};
+				try {
+					expect(await execute(first, { OMP_TEST_BASH_ENV_OVERLAY: value })).toContain(`<${value}>`);
+					expect(await execute(second, { OMP_TEST_BASH_ENV_OVERLAY: "sibling" })).toContain("<sibling>");
+					expect(await execute(first)).toContain("<>");
+					expect(await execute(second)).toContain("<>");
+					expect(process.env.OMP_TEST_BASH_ENV_OVERLAY).toBeUndefined();
+				} finally {
+					await manager.dispose();
+				}
+			},
+		);
+
 		it("should execute simple commands", async () => {
 			const result = await bashTool.execute("test-call-8", { command: "echo 'test output'" });
 
