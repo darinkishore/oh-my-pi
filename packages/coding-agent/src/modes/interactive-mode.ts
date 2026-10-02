@@ -2561,7 +2561,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			iconName: cmd.icon ?? "action",
 		}));
 
-
 		// Convert custom commands (TypeScript) to SlashCommand format
 		const customCommands: SlashCommand[] = this.session.customCommands.map(loaded => {
 			const complete = loaded.command.getArgumentCompletions?.bind(loaded.command);
@@ -2605,6 +2604,7 @@ export class InteractiveMode implements InteractiveModeContext {
 				name: command.name,
 				description: command.description ?? "(hook command)",
 				icon: getSlashCommandTypeIcon("extension"),
+				iconName: "extension",
 				getArgumentCompletions: command.getArgumentCompletions,
 			}),
 		);
@@ -2630,8 +2630,10 @@ export class InteractiveMode implements InteractiveModeContext {
 	 * the session's current file-based slash commands and prompt templates.
 	 */
 	#rebuildSlashCommandAutocomplete(basePath: string): void {
-		if (theme.getSymbolPreset() !== this.#slashIconPreset)
+		if (theme.getSymbolPreset() !== this.#slashIconPreset) {
 			this.#pendingSlashCommands = this.#buildPendingSlashCommands();
+			this.#extensionSlashCommands = this.#buildExtensionSlashCommands();
+		}
 		const fileCommands = this.session.slashCommands;
 		this.fileSlashCommands = new Set(fileCommands.map(cmd => cmd.name));
 		const promptIcon = getSlashCommandTypeIcon("prompt");

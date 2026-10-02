@@ -241,7 +241,6 @@ describe("generate_image tool gating", () => {
 		expect(mcpCalls).toBe(1);
 	});
 
-
 	it("keeps transport-only write across enabled-set round trips", async () => {
 		const session = await sessionWithCustomTools(["read"], []);
 		await session.refreshMCPTools([customTool("mcp__test__search", true)]);

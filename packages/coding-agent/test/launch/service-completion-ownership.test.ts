@@ -14,6 +14,7 @@ import {
 } from "../../src/launch/protocol";
 import { listServices, sendService, startService, waitForOwnedServiceCompletion } from "../../src/launch/services";
 import type { ToolSession } from "../../src/tools";
+import { BashTool } from "../../src/tools/bash";
 
 interface EmbeddedBroker {
 	/** Settles once this in-process broker has shut down and flushed its metadata. */
@@ -47,6 +48,49 @@ async function startBroker(projectDir: string, runtimeDir: string): Promise<Embe
 }
 
 describe("session-owned supervised services", () => {
+	it("keeps bash service environment overlays literal and isolated between launches", async () => {
+		using tempDir = TempDir.createSync("@omp-service-env-");
+		const projectDir = path.join(tempDir.path(), "project");
+		const runtimeDir = path.join(tempDir.path(), "runtime");
+		await fs.mkdir(projectDir);
+		const client = await brokerClients.createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
+		const previousTitle = process.title;
+		const broker = await startBroker(projectDir, runtimeDir);
+		const session: ToolSession = {
+			cwd: projectDir,
+			hasUI: false,
+			settings: Settings.isolated(),
+			getSessionFile: () => null,
+			getSessionSpawns: () => "*",
+			getAgentId: () => "Main",
+			getSessionId: () => "env-session",
+		};
+		const value = "literal 'quoted' $(not-a-command); $HOME";
+		try {
+			vi.spyOn(brokerClients, "daemonClientForProject").mockResolvedValue(client);
+			const bash = new BashTool(session);
+			await bash.execute("service-overlay", {
+				name: "with-overlay",
+				command: 'printf "%s" "$OMP_SERVICE_OVERLAY_PROBE" > with.txt; echo service-ready; read answer',
+				env: { OMP_SERVICE_OVERLAY_PROBE: value },
+				ready: { log: "service-ready", timeout: 5 },
+			});
+			await bash.execute("service-without-overlay", {
+				name: "without-overlay",
+				command: 'printf "%s" "$OMP_SERVICE_OVERLAY_PROBE" > without.txt; echo service-ready; read answer',
+				ready: { log: "service-ready", timeout: 5 },
+			});
+			expect(await fs.readFile(path.join(projectDir, "with.txt"), "utf8")).toBe(value);
+			expect(await fs.readFile(path.join(projectDir, "without.txt"), "utf8")).toBe("");
+		} finally {
+			vi.restoreAllMocks();
+			await client.request({ op: "shutdown" }).catch(() => undefined);
+			client.close();
+			await broker.finished;
+			process.title = previousTitle;
+		}
+	}, 15_000);
+
 	it("delivers a failed service only to its session when another session shares the broker", async () => {
 		using tempDir = TempDir.createSync("@omp-service-completion-");
 		const projectDir = path.join(tempDir.path(), "project");

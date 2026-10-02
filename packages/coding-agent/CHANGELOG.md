@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserved Orientation's per-call bash environment overlays, including supervised services, across the v18.4.9 update without leaking values into later launches.
+- Kept extension slash-command icons synchronized with symbol-preset changes in the live reload catalog.
+
 ## [18.4.9] - 2026-10-01
 
 ### Added

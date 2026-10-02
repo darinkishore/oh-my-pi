@@ -274,6 +274,7 @@ describe("Mnemopi tool factories", () => {
 		session.xdev = {
 			tools,
 			mountedNames: new Set(["recall", "memory_edit"]),
+			catalog: new Map(tools),
 			builtInNames: new Set(tools.keys()),
 			isActive: name => name === "reflect",
 		};
